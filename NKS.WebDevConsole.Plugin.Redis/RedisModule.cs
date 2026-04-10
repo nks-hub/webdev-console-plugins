@@ -71,44 +71,41 @@ public sealed class RedisModule : IServiceModule, IAsyncDisposable
         if (!string.IsNullOrEmpty(_config.ExecutablePath) && File.Exists(_config.ExecutablePath))
             return;
 
-        var candidates = new List<string>();
+        // Only look under NKS WDC managed binaries
+        var redisRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".wdc", "binaries", "redis");
 
-        // Check well-known Windows paths
-        candidates.Add(@"C:\tools\redis\redis-server.exe");
-        candidates.Add(@"C:\Program Files\Redis\redis-server.exe");
+        if (!Directory.Exists(redisRoot))
+            return;
 
-        // Chocolatey
-        var chocoPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "chocolatey", "lib", "redis", "tools", "redis-server.exe");
-        candidates.Add(chocoPath);
-
-        var chocoPathAlt = @"C:\ProgramData\chocolatey\lib\redis\tools\redis-server.exe";
-        candidates.Add(chocoPathAlt);
-
-        foreach (var path in candidates)
-        {
-            if (File.Exists(path))
-            {
-                _config.ExecutablePath = path;
-                _config.CliPath ??= Path.Combine(Path.GetDirectoryName(path)!, "redis-cli.exe");
-                return;
-            }
-        }
-
-        // Check PATH
-        var pathEnv = Environment.GetEnvironmentVariable("PATH") ?? "";
-        var separator = OperatingSystem.IsWindows() ? ';' : ':';
         var exeName = OperatingSystem.IsWindows() ? "redis-server.exe" : "redis-server";
+        var cliName = OperatingSystem.IsWindows() ? "redis-cli.exe" : "redis-cli";
 
-        foreach (var dir in pathEnv.Split(separator, StringSplitOptions.RemoveEmptyEntries))
+        // Pick the highest installed version
+        var versionDirs = Directory.GetDirectories(redisRoot)
+            .Where(d => !Path.GetFileName(d).StartsWith('.'))
+            .OrderByDescending(d => d, StringComparer.Ordinal);
+
+        foreach (var vdir in versionDirs)
         {
-            var fullPath = Path.Combine(dir.Trim(), exeName);
-            if (File.Exists(fullPath))
+            // redis-windows archives: redis-server.exe at root or in bin/
+            var candidates = new[]
             {
-                _config.ExecutablePath = fullPath;
-                var cliName = OperatingSystem.IsWindows() ? "redis-cli.exe" : "redis-cli";
-                _config.CliPath ??= Path.Combine(dir.Trim(), cliName);
+                Path.Combine(vdir, exeName),
+                Path.Combine(vdir, "bin", exeName),
+            };
+
+            foreach (var candidate in candidates)
+            {
+                if (!File.Exists(candidate)) continue;
+                _config.ExecutablePath = candidate;
+                var dir = Path.GetDirectoryName(candidate)!;
+                _config.CliPath ??= Path.Combine(dir, cliName);
+                _config.DataDir ??= Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                    ".wdc", "data", "redis");
+                Directory.CreateDirectory(_config.DataDir);
                 return;
             }
         }

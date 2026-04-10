@@ -66,43 +66,26 @@ public sealed class MailpitModule : IServiceModule, IAsyncDisposable
         if (!string.IsNullOrEmpty(_config.ExecutablePath) && File.Exists(_config.ExecutablePath))
             return;
 
-        var candidates = new List<string>();
+        // Only look under NKS WDC managed binaries
+        var mailpitRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".wdc", "binaries", "mailpit");
 
-        // Well-known Windows paths
-        candidates.Add(@"C:\tools\mailpit\mailpit.exe");
+        if (!Directory.Exists(mailpitRoot))
+            return;
 
-        // Chocolatey
-        var chocoPath = @"C:\ProgramData\chocolatey\bin\mailpit.exe";
-        candidates.Add(chocoPath);
-
-        // Go bin
-        var goPath = Environment.GetEnvironmentVariable("GOPATH");
-        if (!string.IsNullOrEmpty(goPath))
-            candidates.Add(Path.Combine(goPath, "bin", "mailpit.exe"));
-
-        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        candidates.Add(Path.Combine(userProfile, "go", "bin", "mailpit.exe"));
-
-        foreach (var path in candidates)
-        {
-            if (File.Exists(path))
-            {
-                _config.ExecutablePath = path;
-                return;
-            }
-        }
-
-        // Check PATH
-        var pathEnv = Environment.GetEnvironmentVariable("PATH") ?? "";
-        var separator = OperatingSystem.IsWindows() ? ';' : ':';
         var exeName = OperatingSystem.IsWindows() ? "mailpit.exe" : "mailpit";
 
-        foreach (var dir in pathEnv.Split(separator, StringSplitOptions.RemoveEmptyEntries))
+        var versionDirs = Directory.GetDirectories(mailpitRoot)
+            .Where(d => !Path.GetFileName(d).StartsWith('.'))
+            .OrderByDescending(d => d, StringComparer.Ordinal);
+
+        foreach (var vdir in versionDirs)
         {
-            var fullPath = Path.Combine(dir.Trim(), exeName);
-            if (File.Exists(fullPath))
+            var candidate = Path.Combine(vdir, exeName);
+            if (File.Exists(candidate))
             {
-                _config.ExecutablePath = fullPath;
+                _config.ExecutablePath = candidate;
                 return;
             }
         }
@@ -324,7 +307,7 @@ public sealed class MailpitModule : IServiceModule, IAsyncDisposable
 
     private ProcessStartInfo BuildStartInfo()
     {
-        var args = $"--smtp-bind-addr 0.0.0.0:{_config.SmtpPort} --listen 0.0.0.0:{_config.WebPort}";
+        var args = $"--smtp 0.0.0.0:{_config.SmtpPort} --listen 0.0.0.0:{_config.WebPort}";
 
         return new ProcessStartInfo
         {
