@@ -11,6 +11,11 @@ namespace NKS.WebDevConsole.Plugin.Apache;
 
 public sealed class ApacheConfig
 {
+    /// <summary>
+    /// MAMP default installation root. Used as fallback when no explicit paths are set.
+    /// </summary>
+    public string MampRoot { get; set; } = @"C:\MAMP";
+
     public string ExecutablePath { get; set; } = "httpd";
     public string ServerRoot { get; set; } = string.Empty;
     public string ConfigFile { get; set; } = "conf/httpd.conf";
@@ -19,6 +24,35 @@ public sealed class ApacheConfig
     public int HttpPort { get; set; } = 80;
     public int HttpsPort { get; set; } = 443;
     public int GracefulTimeoutSecs { get; set; } = 30;
+
+    /// <summary>
+    /// Applies MAMP defaults when ServerRoot/ExecutablePath are not explicitly configured.
+    /// </summary>
+    public void ApplyMampDefaults()
+    {
+        if (!Directory.Exists(MampRoot))
+            return;
+
+        var mampHttpd = Path.Combine(MampRoot, "bin", "apache", "bin", "httpd.exe");
+        if (File.Exists(mampHttpd) && (ExecutablePath == "httpd" || string.IsNullOrEmpty(ExecutablePath)))
+            ExecutablePath = mampHttpd;
+
+        var mampServerRoot = Path.Combine(MampRoot, "bin", "apache");
+        if (Directory.Exists(mampServerRoot) && string.IsNullOrEmpty(ServerRoot))
+            ServerRoot = mampServerRoot;
+
+        var mampConfDir = Path.Combine(MampRoot, "conf", "apache");
+        if (Directory.Exists(mampConfDir) && ConfigFile == "conf/httpd.conf")
+            ConfigFile = Path.Combine(mampConfDir, "httpd.conf");
+
+        var mampLogDir = Path.Combine(MampRoot, "logs");
+        if (Directory.Exists(mampLogDir) && LogDirectory == "logs")
+            LogDirectory = mampLogDir;
+
+        var sitesDir = Path.Combine(mampConfDir, "sites-enabled");
+        if (VhostsDirectory == "conf/sites-enabled")
+            VhostsDirectory = sitesDir;
+    }
 }
 
 /// <summary>
@@ -74,6 +108,23 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
 
     public async Task InitializeAsync(CancellationToken ct)
     {
+        // Try MAMP defaults first (most common local dev setup on Windows)
+        if (OperatingSystem.IsWindows())
+        {
+            _config.ApplyMampDefaults();
+            if (_config.ExecutablePath != "httpd" && File.Exists(_config.ExecutablePath))
+            {
+                _logger.LogInformation("Using MAMP Apache: {Path}", _config.ExecutablePath);
+
+                // Ensure vhosts directory exists
+                if (!string.IsNullOrEmpty(_config.VhostsDirectory))
+                    Directory.CreateDirectory(_config.VhostsDirectory);
+
+                return;
+            }
+        }
+
+        // Fall back to auto-detection via ApacheVersionManager
         if (string.IsNullOrEmpty(_config.ExecutablePath) || _config.ExecutablePath == "httpd")
         {
             var installations = await _versionManager.DetectAllAsync(
@@ -316,7 +367,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             catch { /* process may have exited between check and Refresh() */ }
         }
 
-        return Task.FromResult(new ServiceStatus(state, pid, uptime, _restartCount, cpu, memory));
+        return Task.FromResult(new ServiceStatus("apache", "Apache HTTP Server", state, pid, cpu, memory, uptime));
     }
 
     // ── IServiceModule: GetLogsAsync ─────────────────────────────────────────

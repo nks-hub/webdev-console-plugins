@@ -214,9 +214,8 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
         }
 
         var status = new ServiceStatus(
-            _state, firstPid,
-            _running.IsEmpty ? TimeSpan.Zero : DateTime.UtcNow - _running.Values.First().StartTime,
-            RestartCount: 0, totalCpu, totalMemory);
+            "php-cgi", "PHP-CGI", _state, firstPid, totalCpu, totalMemory,
+            _running.IsEmpty ? TimeSpan.Zero : DateTime.UtcNow - _running.Values.First().StartTime);
 
         return Task.FromResult(status);
     }
