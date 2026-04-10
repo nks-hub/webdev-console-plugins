@@ -1,0 +1,34 @@
+{
+  "id": "nks.wdc.php",
+  "displayName": "PHP (Multi-version)",
+  "version": "1.0.0",
+  "description": "PHP 5.6–8.4 multi-version management. PHP-FPM on Unix, php-cgi.exe on Windows. Per-site version assignment, extension control, Xdebug toggle, Composer integration.",
+  "author": "NKS",
+  "license": "Apache-2.0",
+  "entryAssembly": "NKS.WebDevConsole.Plugin.PHP.dll",
+  "entryType": "NKS.WebDevConsole.Plugin.PHP.PhpPlugin",
+  "serviceId": "php",
+  "serviceType": "Other",
+  "defaultPorts": [9056, 9070, 9071, 9072, 9073, 9074, 9080, 9081, 9082, 9083, 9084],
+  "supportedPlatforms": ["windows", "macos", "linux"],
+  "minDaemonVersion": "1.0.0",
+  "dependencies": [],
+  "capabilities": [
+    "start", "stop", "reload", "multi-version",
+    "extension-management", "xdebug-toggle",
+    "composer", "cli-aliases", "health-check", "log-streaming"
+  ],
+  "phpVersionPortMap": {
+    "5.6": 9056,
+    "7.0": 9070,
+    "7.1": 9071,
+    "7.2": 9072,
+    "7.3": 9073,
+    "7.4": 9074,
+    "8.0": 9080,
+    "8.1": 9081,
+    "8.2": 9082,
+    "8.3": 9083,
+    "8.4": 9084
+  }
+}

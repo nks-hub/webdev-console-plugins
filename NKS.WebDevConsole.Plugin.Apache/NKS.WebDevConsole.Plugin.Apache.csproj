@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>NKS.WebDevConsole.Plugin.Apache</AssemblyName>
+    <RootNamespace>NKS.WebDevConsole.Plugin.Apache</RootNamespace>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="CliWrap" Version="3.10.1" />
+    <PackageReference Include="Scriban" Version="7.1.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Templates\vhost.conf.scriban" />
+    <EmbeddedResource Include="Templates\httpd.conf.scriban" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\daemon\NKS.WebDevConsole.Plugin.SDK\NKS.WebDevConsole.Plugin.SDK.csproj" />
+  </ItemGroup>
+</Project>

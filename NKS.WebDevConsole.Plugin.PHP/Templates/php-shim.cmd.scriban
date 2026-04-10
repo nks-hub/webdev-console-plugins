@@ -1,0 +1,5 @@
+@echo off
+rem NKS WDC PHP {{ version }} shim — do not edit.
+rem Alias: php{{ version_tag }} → {{ php_exe }}
+set PHPRC={{ ini_dir }}
+"{{ php_exe }}" %*
