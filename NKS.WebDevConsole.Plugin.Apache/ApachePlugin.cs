@@ -1,13 +1,15 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NKS.WebDevConsole.Core.Interfaces;
+using NKS.WebDevConsole.Core.Models;
+using NKS.WebDevConsole.Plugin.SDK;
 
 namespace NKS.WebDevConsole.Plugin.Apache;
 
 /// <summary>
 /// IWdcPlugin entry point — registered via AssemblyLoadContext by the daemon's PluginLoader.
 /// </summary>
-public sealed class ApachePlugin : IWdcPlugin
+public sealed class ApachePlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.apache";
     public string DisplayName => "Apache HTTP Server";
@@ -40,4 +42,14 @@ public sealed class ApachePlugin : IWdcPlugin
         if (_module is not null)
             await _module.StopAsync(ct);
     }
+
+    public PluginUiDefinition GetUiDefinition() =>
+        new UiSchemaBuilder(Id)
+            .Category("Web Servers")
+            .Icon("el-icon-connection")
+            .AddServiceCard("apache")
+            .AddConfigEditor("apache")
+            .AddLogViewer("apache")
+            .AddMetricsChart("apache")
+            .Build();
 }

@@ -1,13 +1,15 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NKS.WebDevConsole.Core.Interfaces;
+using NKS.WebDevConsole.Core.Models;
+using NKS.WebDevConsole.Plugin.SDK;
 
 namespace NKS.WebDevConsole.Plugin.MySQL;
 
 /// <summary>
 /// IWdcPlugin entry point — registered via AssemblyLoadContext by the daemon's PluginLoader.
 /// </summary>
-public sealed class MySqlPlugin : IWdcPlugin
+public sealed class MySqlPlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.mysql";
     public string DisplayName => "MySQL";
@@ -35,4 +37,14 @@ public sealed class MySqlPlugin : IWdcPlugin
         if (_module is not null)
             await _module.StopAsync(ct);
     }
+
+    public PluginUiDefinition GetUiDefinition() =>
+        new UiSchemaBuilder(Id)
+            .Category("Databases")
+            .Icon("el-icon-coin")
+            .AddServiceCard("mysql")
+            .AddConfigEditor("mysql")
+            .AddLogViewer("mysql")
+            .AddMetricsChart("mysql")
+            .Build();
 }
