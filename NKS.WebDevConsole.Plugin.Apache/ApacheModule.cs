@@ -108,37 +108,147 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
 
     public async Task InitializeAsync(CancellationToken ct)
     {
-        // Try MAMP defaults first (most common local dev setup on Windows)
+        // PRIORITY 1: Our own Apache binary at %USERPROFILE%\.wdc\binaries\apache
         if (OperatingSystem.IsWindows())
         {
-            _config.ApplyMampDefaults();
-            if (_config.ExecutablePath != "httpd" && File.Exists(_config.ExecutablePath))
+            var ownBinaryRoot = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".wdc", "binaries", "apache");
+            var ownHttpd = Path.Combine(ownBinaryRoot, "bin", "httpd.exe");
+
+            if (File.Exists(ownHttpd))
             {
-                _logger.LogInformation("Using MAMP Apache: {Path}", _config.ExecutablePath);
+                _config.ExecutablePath = ownHttpd;
+                _config.ServerRoot = ownBinaryRoot;
+                _config.ConfigFile = Path.Combine(ownBinaryRoot, "conf", "httpd.conf");
+                _config.LogDirectory = Path.Combine(ownBinaryRoot, "logs");
+                _config.VhostsDirectory = Path.Combine(ownBinaryRoot, "conf", "sites-enabled");
 
-                // Ensure vhosts directory exists
-                if (!string.IsNullOrEmpty(_config.VhostsDirectory))
-                    Directory.CreateDirectory(_config.VhostsDirectory);
+                Directory.CreateDirectory(_config.VhostsDirectory);
+                Directory.CreateDirectory(_config.LogDirectory);
 
+                // DYNAMICALLY generate httpd.conf from Scriban template
+                await GenerateMainConfigAsync(ct);
+
+                _logger.LogInformation("Using own Apache binary: {Path}", ownHttpd);
                 return;
             }
         }
 
-        // Fall back to auto-detection via ApacheVersionManager
-        if (string.IsNullOrEmpty(_config.ExecutablePath) || _config.ExecutablePath == "httpd")
-        {
-            var installations = await _versionManager.DetectAllAsync(
-                AppContext.BaseDirectory, ct);
+        // No own binary — fail with clear message
+        _logger.LogError("Apache binary not found at {Path}. Install via NKS WDC settings.",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".wdc", "binaries", "apache", "bin", "httpd.exe"));
+    }
 
-            if (installations.Count > 0)
-            {
-                _config.ExecutablePath = installations[0].ExecutablePath;
-                if (string.IsNullOrEmpty(_config.ServerRoot))
-                    _config.ServerRoot = installations[0].ServerRoot;
-                _logger.LogInformation("Auto-detected Apache: {Path} v{Version}",
-                    _config.ExecutablePath, installations[0].Version);
-            }
+    /// <summary>
+    /// Generates httpd.conf dynamically from embedded Scriban template.
+    /// </summary>
+    private async Task GenerateMainConfigAsync(CancellationToken ct)
+    {
+        var templateContent = await LoadEmbeddedTemplateAsync("httpd.conf.scriban");
+        var template = Scriban.Template.Parse(templateContent);
+
+        var model = new
+        {
+            generated_at = DateTime.UtcNow.ToString("u"),
+            server_root = _config.ServerRoot,
+            http_port = 80,
+            https_port = 443,
+            ssl_enabled = false,
+            php_enabled = true,
+            is_windows = OperatingSystem.IsWindows(),
+            server_admin = "admin@localhost",
+            server_name = "localhost:80",
+            log_dir = _config.LogDirectory,
+            vhosts_dir = _config.VhostsDirectory,
+        };
+
+        var result = template.Render(model, member => member.Name);
+        await File.WriteAllTextAsync(_config.ConfigFile, result, ct);
+        _logger.LogInformation("Generated httpd.conf at {Path}", _config.ConfigFile);
+    }
+
+    /// <summary>
+    /// Generates an Apache vhost file for the given site, rendering the embedded Scriban template
+    /// and writing it to the configured VhostsDirectory.
+    /// </summary>
+    public async Task GenerateVhostAsync(SiteConfig site, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(_config.VhostsDirectory))
+            throw new InvalidOperationException("Apache module is not initialized (VhostsDirectory is empty).");
+
+        Directory.CreateDirectory(_config.VhostsDirectory);
+
+        var templateContent = await LoadEmbeddedTemplateAsync("vhost.conf.scriban");
+        var template = Scriban.Template.Parse(templateContent);
+        if (template.HasErrors)
+            throw new InvalidOperationException(
+                $"vhost template parse error: {string.Join(", ", template.Messages)}");
+
+        // PHP version → FastCGI port mapping: 8.4 → 9084, 8.3 → 9083, 8.2 → 9082
+        int phpPort = 9000;
+        if (!string.IsNullOrEmpty(site.PhpVersion) && site.PhpVersion != "none")
+        {
+            var digits = new string(site.PhpVersion.Where(char.IsDigit).ToArray());
+            if (digits.Length >= 2 && int.TryParse(digits[..2], out var parsed))
+                phpPort = 9000 + parsed;
         }
+
+        var model = new
+        {
+            site = new
+            {
+                domain = site.Domain,
+                aliases = site.Aliases ?? Array.Empty<string>(),
+                root = site.DocumentRoot,
+                php_enabled = !string.IsNullOrEmpty(site.PhpVersion) && site.PhpVersion != "none",
+                php_version = site.PhpVersion,
+                php_fcgi_port = phpPort,
+                ssl = site.SslEnabled,
+                cert_path = "",
+                key_path = "",
+                redirects = Array.Empty<object>(),
+            },
+            port = site.HttpPort,
+            is_windows = OperatingSystem.IsWindows(),
+        };
+
+        var result = template.Render(model, m => m.Name);
+        var outPath = Path.Combine(_config.VhostsDirectory, $"{site.Domain}.conf");
+        await File.WriteAllTextAsync(outPath, result, ct);
+        _logger.LogInformation("Generated vhost for {Domain} at {Path}", site.Domain, outPath);
+    }
+
+    /// <summary>
+    /// Removes a previously-generated vhost file for the given domain.
+    /// </summary>
+    public Task RemoveVhostAsync(string domain, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(_config.VhostsDirectory))
+            return Task.CompletedTask;
+
+        var path = Path.Combine(_config.VhostsDirectory, $"{domain}.conf");
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+            _logger.LogInformation("Removed vhost for {Domain}", domain);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private static async Task<string> LoadEmbeddedTemplateAsync(string name)
+    {
+        var asm = typeof(ApacheModule).Assembly;
+        var resourceName = asm.GetManifestResourceNames()
+            .FirstOrDefault(n => n.EndsWith(name, StringComparison.OrdinalIgnoreCase))
+            ?? throw new FileNotFoundException($"Embedded template not found: {name}");
+
+        await using var stream = asm.GetManifestResourceStream(resourceName)
+            ?? throw new FileNotFoundException($"Cannot open embedded template: {resourceName}");
+        using var reader = new StreamReader(stream);
+        return await reader.ReadToEndAsync();
     }
 
     // ── IServiceModule: ValidateConfigAsync ─────────────────────────────────
