@@ -33,7 +33,7 @@ public sealed class SslPlugin : IWdcPlugin
 
         _certsBaseDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".wdc", "ssl", "certs");
+            ".wdc", "ssl", "sites");
         Directory.CreateDirectory(_certsBaseDir);
 
         var detected = await _mkcert.DetectAsync();

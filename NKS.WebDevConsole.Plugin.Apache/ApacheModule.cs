@@ -132,7 +132,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             server_root = _config.ServerRoot,
             http_port = 80,
             https_port = 443,
-            ssl_enabled = false,
+            ssl_enabled = HasAnySslCerts(),
             php_enabled = true,
             is_windows = OperatingSystem.IsWindows(),
             server_admin = "admin@localhost",
@@ -206,6 +206,26 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
                     site.PhpVersion, phpRoot, site.Domain);
         }
 
+        // Resolve SSL cert/key paths from ~/.wdc/ssl/sites/{domain}/
+        string certPath = "", keyPath = "";
+        if (site.SslEnabled)
+        {
+            var sslDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".wdc", "ssl", "sites", site.Domain);
+            var cp = Path.Combine(sslDir, "cert.pem");
+            var kp = Path.Combine(sslDir, "key.pem");
+            if (File.Exists(cp) && File.Exists(kp))
+            {
+                certPath = cp;
+                keyPath = kp;
+            }
+            else
+            {
+                _logger.LogWarning("SSL enabled for {Domain} but cert/key not found at {Dir}", site.Domain, sslDir);
+            }
+        }
+
         var model = new
         {
             site = new
@@ -216,12 +236,13 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
                 php_enabled = !string.IsNullOrEmpty(site.PhpVersion) && site.PhpVersion != "none",
                 php_version = site.PhpVersion,
                 php_fcgi_port = phpPort,
-                ssl = site.SslEnabled,
-                cert_path = "",
-                key_path = "",
+                ssl = site.SslEnabled && !string.IsNullOrEmpty(certPath),
+                cert_path = certPath,
+                key_path = keyPath,
                 redirects = Array.Empty<object>(),
             },
             port = site.HttpPort,
+            https_port = site.HttpsPort > 0 ? site.HttpsPort : 443,
             is_windows = OperatingSystem.IsWindows(),
             php_cgi_path = phpCgiPath,
         };
@@ -248,6 +269,16 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         }
 
         return Task.CompletedTask;
+    }
+
+    private static bool HasAnySslCerts()
+    {
+        var sslSitesDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".wdc", "ssl", "sites");
+        if (!Directory.Exists(sslSitesDir)) return false;
+        return Directory.GetDirectories(sslSitesDir)
+            .Any(d => File.Exists(Path.Combine(d, "cert.pem")));
     }
 
     private static async Task<string> LoadEmbeddedTemplateAsync(string name)
