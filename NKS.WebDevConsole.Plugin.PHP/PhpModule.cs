@@ -402,17 +402,16 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
         var psi = new ProcessStartInfo
         {
             FileName = php.FpmExecutable!,
+            // php-cgi.exe on Windows: -b binds FastCGI socket to addr:port
+            Arguments = $"-b 127.0.0.1:{php.FcgiPort}",
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true
         };
-        // php-cgi listens on FCGI_PORT env var
         psi.Environment["PHP_FCGI_CHILDREN"] = "4";
         psi.Environment["PHP_FCGI_MAX_REQUESTS"] = "500";
         psi.Environment["PHPRC"] = iniDir;
-        psi.Environment["FCGI_PORT"] = php.FcgiPort.ToString();
-        psi.Environment["PHP_FCGI_PORT"] = php.FcgiPort.ToString();
 
         var process = new Process { StartInfo = psi };
         process.Start();

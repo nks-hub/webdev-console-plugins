@@ -15,14 +15,16 @@
     </Directory>
 
     {{ if site.php_enabled -}}
-    # PHP FastCGI handler
+    DirectoryIndex index.php index.html
+
     {{ if is_windows -}}
-    # Windows: php-cgi.exe via TCP
+    # PHP via mod_fcgid — spawns php-cgi.exe per request, passes SCRIPT_FILENAME correctly
     <FilesMatch "\.php$">
-        SetHandler "proxy:fcgi://127.0.0.1:{{ site.php_fcgi_port }}"
+        Options +ExecCGI
+        AddHandler fcgid-script .php
+        FcgidWrapper "{{ php_cgi_path | string.replace '\\' '/' }}" .php
     </FilesMatch>
     {{- else -}}
-    # Unix: PHP-FPM via socket
     <FilesMatch "\.php$">
         SetHandler "proxy:unix:/run/php/php{{ site.php_version | string.replace '.' '' }}-fpm.sock|fcgi://localhost"
     </FilesMatch>

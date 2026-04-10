@@ -33,7 +33,11 @@ LoadModule alias_module modules/mod_alias.so
 LoadModule autoindex_module modules/mod_autoindex.so
 LoadModule vhost_alias_module modules/mod_vhost_alias.so
 
-# PHP FastCGI support
+# PHP FastCGI support via mod_fcgid (Apache Lounge external module)
+LoadModule fcgid_module modules/mod_fcgid.so
+LoadModule actions_module modules/mod_actions.so
+
+# mod_proxy_fcgi kept as fallback (unused on Windows)
 LoadModule proxy_module modules/mod_proxy.so
 LoadModule proxy_fcgi_module modules/mod_proxy_fcgi.so
 

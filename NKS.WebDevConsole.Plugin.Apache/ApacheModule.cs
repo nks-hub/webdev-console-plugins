@@ -195,6 +195,23 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
                 phpPort = 9000 + parsed;
         }
 
+        // Resolve php-cgi.exe path for mod_fcgid FcgidWrapper (Windows MAMP layout)
+        string phpCgiPath = "";
+        if (OperatingSystem.IsWindows() && !string.IsNullOrEmpty(site.PhpVersion) && site.PhpVersion != "none")
+        {
+            var mampPhpDir = @"C:\MAMP\bin\php";
+            if (Directory.Exists(mampPhpDir))
+            {
+                var versionPrefix = "php" + site.PhpVersion;
+                var match = Directory.GetDirectories(mampPhpDir, versionPrefix + "*").FirstOrDefault();
+                if (match != null)
+                {
+                    var cgi = Path.Combine(match, "php-cgi.exe");
+                    if (File.Exists(cgi)) phpCgiPath = cgi;
+                }
+            }
+        }
+
         var model = new
         {
             site = new
@@ -212,6 +229,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             },
             port = site.HttpPort,
             is_windows = OperatingSystem.IsWindows(),
+            php_cgi_path = phpCgiPath,
         };
 
         var result = template.Render(model, m => m.Name);
