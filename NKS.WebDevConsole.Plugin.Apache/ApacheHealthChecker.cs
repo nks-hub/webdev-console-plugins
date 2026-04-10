@@ -15,16 +15,16 @@ public sealed class ApacheHealthChecker
     public ApacheHealthChecker(ILogger<ApacheHealthChecker> logger)
     {
         _logger = logger;
-        _http = new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(3)
-        };
         // Accept self-signed certs on localhost (dev env)
         var handler = new HttpClientHandler
         {
             ServerCertificateCustomValidationCallback = (_, cert, _, _) =>
                 cert?.Issuer?.Contains("NKS", StringComparison.OrdinalIgnoreCase) == true
                 || cert?.Issuer?.Contains("mkcert", StringComparison.OrdinalIgnoreCase) == true
+        };
+        _http = new HttpClient(handler)
+        {
+            Timeout = TimeSpan.FromSeconds(3)
         };
     }
 
