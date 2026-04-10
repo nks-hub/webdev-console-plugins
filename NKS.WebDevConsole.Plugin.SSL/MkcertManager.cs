@@ -21,47 +21,34 @@ public class MkcertManager
     public string? MkcertPath => _mkcertPath;
 
     /// <summary>
-    /// Scans known locations and PATH for mkcert.
+    /// Scans NKS WDC managed binaries for mkcert.
     /// </summary>
     public async Task<bool> DetectAsync()
     {
-        var candidates = new[]
-        {
-            "mkcert",
-            @"C:\tools\mkcert.exe",
-            @"C:\ProgramData\chocolatey\bin\mkcert.exe",
-            Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                "scoop", "shims", "mkcert.exe"),
-            Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                "go", "bin", "mkcert.exe")
-        };
+        // Priority 1: own binary under ~/.wdc/binaries/mkcert/
+        var mkcertRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".wdc", "binaries", "mkcert");
 
-        foreach (var candidate in candidates)
+        if (Directory.Exists(mkcertRoot))
         {
-            try
+            var exeName = OperatingSystem.IsWindows() ? "mkcert.exe" : "mkcert";
+            foreach (var vdir in Directory.GetDirectories(mkcertRoot)
+                .Where(d => !Path.GetFileName(d).StartsWith('.'))
+                .OrderByDescending(d => d))
             {
-                var result = await Cli.Wrap(candidate)
-                    .WithArguments("--version")
-                    .WithValidation(CommandResultValidation.None)
-                    .ExecuteBufferedAsync();
-
-                if (result.ExitCode == 0)
+                var candidate = Path.Combine(vdir, exeName);
+                if (File.Exists(candidate))
                 {
                     _mkcertPath = candidate;
-                    _logger.LogInformation("Found mkcert at {Path}: {Version}",
-                        candidate, result.StandardOutput.Trim());
+                    _logger.LogInformation("Found mkcert at {Path}", candidate);
                     return true;
                 }
             }
-            catch
-            {
-                // Candidate not found, continue
-            }
         }
 
-        _logger.LogWarning("mkcert not found in any known location");
+        _logger.LogWarning(
+            "mkcert not found. Install with POST /api/binaries/install {{ \"app\": \"mkcert\", \"version\": \"1.4.4\" }}");
         return false;
     }
 
