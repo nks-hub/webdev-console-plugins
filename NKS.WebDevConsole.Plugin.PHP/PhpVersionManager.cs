@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using CliWrap;
 using CliWrap.Buffered;
 using Microsoft.Extensions.Logging;
@@ -6,8 +5,8 @@ using Microsoft.Extensions.Logging;
 namespace NKS.WebDevConsole.Plugin.PHP;
 
 public record PhpInstallation(
-    string Version,         // "8.2.25"
-    string MajorMinor,      // "8.2"
+    string Version,         // "8.4.20"
+    string MajorMinor,      // "8.4"
     string ExecutablePath,  // full path to php / php.exe
     string? FpmExecutable,  // php-fpm path (Unix) or php-cgi.exe (Windows)
     string Directory,       // parent directory
@@ -16,15 +15,21 @@ public record PhpInstallation(
 );
 
 /// <summary>
-/// Detects all PHP installations on the machine, across any PHP version from 5.6 to 8.4.
+/// Detects PHP installations under <c>~/.wdc/binaries/php/{version}/</c>.
+/// NKS WDC manages its own PHP binaries — this manager does NOT scan MAMP, WAMP,
+/// Laragon, Homebrew, system PATH, or any third-party install location.
+/// Use BinaryManager (in the daemon) to download new versions.
 /// Port assignment: 90{major}{minor} — e.g., 8.2 → 9082, 7.4 → 9074, 5.6 → 9056.
 /// </summary>
-public sealed partial class PhpVersionManager
+public sealed class PhpVersionManager
 {
     private readonly ILogger<PhpVersionManager> _logger;
 
     /// <summary>Active (selected) PHP version for new sites. Defaults to highest detected.</summary>
     public string? ActiveVersion { get; private set; }
+
+    /// <summary>Root directory containing per-version PHP installs.</summary>
+    public string BinariesRoot { get; }
 
     // Deterministic port map matches plugin.json phpVersionPortMap
     private static readonly Dictionary<string, int> PortMap = new()
@@ -32,47 +37,64 @@ public sealed partial class PhpVersionManager
         ["5.5"] = 9055, ["5.6"] = 9056,
         ["7.0"] = 9070, ["7.1"] = 9071, ["7.2"] = 9072,
         ["7.3"] = 9073, ["7.4"] = 9074,
-        ["8.0"] = 9080, ["8.1"] = 9081, ["8.2"] = 9082, ["8.3"] = 9083, ["8.4"] = 9084
+        ["8.0"] = 9080, ["8.1"] = 9081, ["8.2"] = 9082, ["8.3"] = 9083, ["8.4"] = 9084,
+        ["8.5"] = 9085
     };
-
-    /// <summary>Regex matching MAMP-style directory names like "php8.4.12", "php5.6.34".</summary>
-    [GeneratedRegex(@"^php(\d+\.\d+\.\d+)$", RegexOptions.IgnoreCase)]
-    private static partial Regex MampDirNameRegex();
-
-    /// <summary>Well-known MAMP base paths per platform.</summary>
-    private static readonly string[] MampBasePaths = OperatingSystem.IsWindows()
-        ? [@"C:\MAMP\bin\php", @"D:\MAMP\bin\php"]
-        : OperatingSystem.IsMacOS()
-            ? ["/Applications/MAMP/bin/php"]
-            : [];
 
     public PhpVersionManager(ILogger<PhpVersionManager> logger)
     {
         _logger = logger;
+        BinariesRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".wdc", "binaries", "php");
     }
 
     public async Task<IReadOnlyList<PhpInstallation>> DetectAllAsync(
         string appDirectory,
         CancellationToken ct = default)
     {
-        var candidates = GatherCandidateExecutables(appDirectory);
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var results = new List<PhpInstallation>();
-
-        foreach (var exe in candidates.Distinct())
+        if (!Directory.Exists(BinariesRoot))
         {
-            if (!File.Exists(exe) || !seen.Add(exe))
-                continue;
+            _logger.LogWarning(
+                "PHP binaries directory does not exist: {Path}. " +
+                "Use POST /api/binaries/install with {{ \"app\": \"php\", \"version\": \"8.4.20\" }} to install a version.",
+                BinariesRoot);
+            return Array.Empty<PhpInstallation>();
+        }
 
-            var installation = await ProbePhpAsync(exe, ct);
+        var results = new List<PhpInstallation>();
+        var exe = OperatingSystem.IsWindows() ? "php.exe" : "php";
+
+        foreach (var versionDir in Directory.GetDirectories(BinariesRoot))
+        {
+            var version = Path.GetFileName(versionDir);
+            var phpExe = Path.Combine(versionDir, exe);
+
+            // Some archives extract into nested layouts (e.g. an inner bin/) — try a few common subdirs
+            if (!File.Exists(phpExe))
+            {
+                foreach (var sub in new[] { "bin", "" })
+                {
+                    var candidate = Path.Combine(versionDir, sub, exe);
+                    if (File.Exists(candidate)) { phpExe = candidate; break; }
+                }
+            }
+
+            if (!File.Exists(phpExe))
+            {
+                _logger.LogDebug("Skipping {Dir}: no {Exe} found", versionDir, exe);
+                continue;
+            }
+
+            var installation = await ProbePhpAsync(phpExe, ct);
             if (installation is not null)
             {
                 results.Add(installation);
-                _logger.LogInformation("Detected PHP {Version} at {Path}", installation.Version, exe);
+                _logger.LogInformation("Detected PHP {Version} at {Path}", installation.Version, phpExe);
             }
         }
 
-        var ordered = results.OrderByDescending(x => x.MajorMinor).ToList();
+        var ordered = results.OrderByDescending(x => Version.TryParse(x.Version, out var v) ? v : new Version()).ToList();
 
         // Default active version = highest detected
         if (ordered.Count > 0)
@@ -88,97 +110,6 @@ public sealed partial class PhpVersionManager
             throw new ArgumentException($"Unknown PHP version: {majorMinor}");
         ActiveVersion = majorMinor;
         _logger.LogInformation("Active PHP version set to {Version}", majorMinor);
-    }
-
-    private IEnumerable<string> GatherCandidateExecutables(string appDirectory)
-    {
-        var exe = OperatingSystem.IsWindows() ? "php.exe" : "php";
-
-        // 1. NKS WDC-managed installs in appDir/php/{version}/
-        if (Directory.Exists(Path.Combine(appDirectory, "php")))
-        {
-            foreach (var vdir in System.IO.Directory.GetDirectories(Path.Combine(appDirectory, "php")))
-                yield return Path.Combine(vdir, exe);
-        }
-
-        // 2. PATH entries
-        var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-        foreach (var dir in path.Split(Path.PathSeparator))
-        {
-            if (!string.IsNullOrWhiteSpace(dir))
-                yield return Path.Combine(dir.Trim(), exe);
-        }
-
-        // 3. MAMP — scan actual directories instead of guessing names
-        foreach (var candidate in ScanMampDirectories(exe))
-            yield return candidate;
-
-        if (OperatingSystem.IsWindows())
-        {
-            // WAMP, Laragon, manual installs
-            foreach (var drive in new[] { "C:\\", "D:\\" })
-            {
-                foreach (var ver in new[] { "5.6", "7.4", "8.0", "8.1", "8.2", "8.3", "8.4" })
-                {
-                    yield return Path.Combine(drive, "php", ver, exe);
-                    yield return Path.Combine(drive, $"php{ver.Replace(".", "")}", exe);
-                    yield return Path.Combine(drive, "laragon", "bin", "php", $"php-{ver}", exe);
-                }
-            }
-        }
-        else if (OperatingSystem.IsMacOS())
-        {
-            // Homebrew multi-version
-            foreach (var ver in new[] { "5.6", "7.4", "8.0", "8.1", "8.2", "8.3", "8.4" })
-            {
-                yield return $"/opt/homebrew/opt/php@{ver}/bin/php";
-                yield return $"/usr/local/opt/php@{ver}/bin/php";
-            }
-        }
-        else
-        {
-            // Ubuntu/Debian: ondrej/php PPA
-            foreach (var ver in new[] { "5.6", "7.4", "8.0", "8.1", "8.2", "8.3", "8.4" })
-                yield return $"/usr/bin/php{ver}";
-        }
-    }
-
-    /// <summary>
-    /// Scans MAMP php directories for real version folders (e.g. php8.4.12, php7.4.30).
-    /// Handles both Windows layout (php.exe at root) and macOS layout (php in bin/).
-    /// </summary>
-    private IEnumerable<string> ScanMampDirectories(string exeName)
-    {
-        foreach (var basePath in MampBasePaths)
-        {
-            if (!System.IO.Directory.Exists(basePath))
-                continue;
-
-            string[] dirs;
-            try
-            {
-                dirs = System.IO.Directory.GetDirectories(basePath);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug("Cannot enumerate MAMP directory {Path}: {Msg}", basePath, ex.Message);
-                continue;
-            }
-
-            foreach (var dir in dirs)
-            {
-                var dirName = Path.GetFileName(dir);
-                if (!MampDirNameRegex().IsMatch(dirName))
-                    continue;
-
-                // Windows MAMP: php.exe is at root of the version dir
-                yield return Path.Combine(dir, exeName);
-
-                // macOS MAMP: php is in bin/ subdir
-                if (!OperatingSystem.IsWindows())
-                    yield return Path.Combine(dir, "bin", exeName);
-            }
-        }
     }
 
     private async Task<PhpInstallation?> ProbePhpAsync(string phpPath, CancellationToken ct)
@@ -220,11 +151,11 @@ public sealed partial class PhpVersionManager
     private static string[] ScanAvailableExtensions(string phpDir)
     {
         var extDir = Path.Combine(phpDir, "ext");
-        if (!System.IO.Directory.Exists(extDir))
+        if (!Directory.Exists(extDir))
             return [];
 
         var pattern = OperatingSystem.IsWindows() ? "php_*.dll" : "*.so";
-        return System.IO.Directory.GetFiles(extDir, pattern)
+        return Directory.GetFiles(extDir, pattern)
             .Select(f =>
             {
                 var name = Path.GetFileNameWithoutExtension(f);
@@ -245,18 +176,15 @@ public sealed partial class PhpVersionManager
             return File.Exists(cgi) ? cgi : null;
         }
 
-        // Unix: look for php-fpm in same dir, or system paths
         foreach (var candidate in new[]
         {
             Path.Combine(phpDir, "php-fpm"),
-            $"/usr/sbin/php-fpm{majorMinor}",
-            $"/opt/homebrew/opt/php@{majorMinor}/sbin/php-fpm"
+            Path.Combine(phpDir, "sbin", "php-fpm"),
         })
         {
             if (File.Exists(candidate))
                 return candidate;
         }
-
         return null;
     }
 
@@ -266,7 +194,7 @@ public sealed partial class PhpVersionManager
         return parts.Length >= 3
             && int.TryParse(parts[0], out var major) && major >= 5
             && int.TryParse(parts[1], out _)
-            && int.TryParse(parts[2].Split('-')[0], out _);  // handle "8.4.0-dev"
+            && int.TryParse(parts[2].Split('-')[0], out _);
     }
 
     public static int GetPortForVersion(string majorMinor)

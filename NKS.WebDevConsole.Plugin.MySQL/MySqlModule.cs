@@ -11,43 +11,48 @@ namespace NKS.WebDevConsole.Plugin.MySQL;
 
 public sealed class MySqlConfig
 {
-    public string MampRoot { get; set; } = @"C:\MAMP";
+    /// <summary>Root for NKS WDC managed MySQL installs.</summary>
+    public string BinariesRoot { get; set; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".wdc", "binaries", "mysql");
+
+    /// <summary>Where this instance stores its datafiles. Default ~/.wdc/data/mysql.</summary>
+    public string DataDir { get; set; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".wdc", "data", "mysql");
+
     public string? ExecutablePath { get; set; }
     public string? MysqladminPath { get; set; }
     public string? ConfigFile { get; set; }
-    public string? DataDir { get; set; }
-    public string? LogDirectory { get; set; }
+    public string LogDirectory { get; set; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".wdc", "logs", "mysql");
     public int Port { get; set; } = 3306;
     public int GracefulTimeoutSecs { get; set; } = 30;
 
-    public void ApplyMampDefaults()
+    /// <summary>
+    /// Resolves the highest installed MySQL version under BinariesRoot and points
+    /// ExecutablePath / MysqladminPath at it. Does NOT touch MAMP or any third-party install.
+    /// </summary>
+    public bool ApplyOwnBinaryDefaults()
     {
-        if (!Directory.Exists(MampRoot))
-            return;
+        if (!Directory.Exists(BinariesRoot)) return false;
 
-        var mysqlBinDir = Path.Combine(MampRoot, "bin", "mysql", "bin");
-        if (Directory.Exists(mysqlBinDir))
+        var versionDirs = Directory.GetDirectories(BinariesRoot)
+            .Where(d => !Path.GetFileName(d).StartsWith('.'))
+            .OrderByDescending(d => d, StringComparer.Ordinal)
+            .ToList();
+
+        foreach (var vdir in versionDirs)
         {
-            var mysqld = Path.Combine(mysqlBinDir, "mysqld.exe");
-            if (File.Exists(mysqld) && string.IsNullOrEmpty(ExecutablePath))
-                ExecutablePath = mysqld;
+            var mysqld = Path.Combine(vdir, "bin", "mysqld.exe");
+            if (!File.Exists(mysqld)) continue;
 
-            var mysqladmin = Path.Combine(mysqlBinDir, "mysqladmin.exe");
-            if (File.Exists(mysqladmin) && string.IsNullOrEmpty(MysqladminPath))
-                MysqladminPath = mysqladmin;
+            ExecutablePath = mysqld;
+            MysqladminPath = Path.Combine(vdir, "bin", "mysqladmin.exe");
+            return true;
         }
-
-        var configPath = Path.Combine(MampRoot, "conf", "mysql", "my.ini");
-        if (File.Exists(configPath) && string.IsNullOrEmpty(ConfigFile))
-            ConfigFile = configPath;
-
-        var dataDir = Path.Combine(MampRoot, "db", "mysql");
-        if (Directory.Exists(dataDir) && string.IsNullOrEmpty(DataDir))
-            DataDir = dataDir;
-
-        var logDir = Path.Combine(MampRoot, "logs");
-        if (Directory.Exists(logDir) && string.IsNullOrEmpty(LogDirectory))
-            LogDirectory = logDir;
+        return false;
     }
 }
 
@@ -90,18 +95,53 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
 
     public async Task InitializeAsync(CancellationToken ct)
     {
-        if (OperatingSystem.IsWindows())
+        Directory.CreateDirectory(_config.LogDirectory);
+        Directory.CreateDirectory(_config.DataDir);
+
+        if (_config.ApplyOwnBinaryDefaults())
         {
-            _config.ApplyMampDefaults();
-            if (!string.IsNullOrEmpty(_config.ExecutablePath) && File.Exists(_config.ExecutablePath))
-            {
-                _logger.LogInformation("Using MAMP MySQL: {Path}", _config.ExecutablePath);
-                return;
-            }
+            _logger.LogInformation("MySQL binary detected: {Path}", _config.ExecutablePath);
+            await EnsureDataDirInitializedAsync(ct);
+        }
+        else
+        {
+            _logger.LogWarning(
+                "No MySQL installed under {Root}. Install with POST /api/binaries/install " +
+                "{{ \"app\": \"mysql\", \"version\": \"8.4.8\" }}",
+                _config.BinariesRoot);
+        }
+    }
+
+    /// <summary>
+    /// Initialize the MySQL data directory on first start (mysqld --initialize-insecure).
+    /// Idempotent: skips if data dir already contains a system tablespace.
+    /// </summary>
+    private async Task EnsureDataDirInitializedAsync(CancellationToken ct)
+    {
+        var ibdata = Path.Combine(_config.DataDir, "ibdata1");
+        var mysqlSystemDb = Path.Combine(_config.DataDir, "mysql");
+        if (File.Exists(ibdata) || Directory.Exists(mysqlSystemDb))
+        {
+            _logger.LogDebug("MySQL data dir already initialized at {Path}", _config.DataDir);
+            return;
         }
 
-        if (string.IsNullOrEmpty(_config.ExecutablePath))
-            _logger.LogWarning("MySQL executable not found");
+        if (string.IsNullOrEmpty(_config.ExecutablePath) || !File.Exists(_config.ExecutablePath))
+            return;
+
+        _logger.LogInformation("Initializing MySQL data dir at {Path} (first run)...", _config.DataDir);
+
+        var args = $"--initialize-insecure --datadir=\"{_config.DataDir}\" --console";
+        var result = await Cli.Wrap(_config.ExecutablePath)
+            .WithArguments(args)
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync(ct);
+
+        if (result.ExitCode == 0)
+            _logger.LogInformation("MySQL data dir initialized successfully");
+        else
+            _logger.LogError("MySQL --initialize-insecure failed (exit {Code}): {Err}",
+                result.ExitCode, result.StandardError.Trim());
     }
 
     // -- IServiceModule: ValidateConfigAsync --
@@ -318,10 +358,7 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
     {
         _watcherCts = new CancellationTokenSource();
 
-        var logDir = !string.IsNullOrEmpty(_config.LogDirectory)
-            ? _config.LogDirectory
-            : Path.Combine(_config.MampRoot, "logs");
-
+        var logDir = _config.LogDirectory;
         if (!Directory.Exists(logDir))
             return;
 
@@ -408,7 +445,7 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
 
     private ProcessStartInfo BuildStartInfo()
     {
-        var args = $"--port={_config.Port} --console";
+        var args = $"--port={_config.Port} --datadir=\"{_config.DataDir}\" --console";
 
         if (!string.IsNullOrEmpty(_config.ConfigFile) && File.Exists(_config.ConfigFile))
             args = $"--defaults-file=\"{_config.ConfigFile}\" " + args;

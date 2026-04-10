@@ -11,10 +11,10 @@ namespace NKS.WebDevConsole.Plugin.Apache;
 
 public sealed class ApacheConfig
 {
-    /// <summary>
-    /// MAMP default installation root. Used as fallback when no explicit paths are set.
-    /// </summary>
-    public string MampRoot { get; set; } = @"C:\MAMP";
+    /// <summary>NKS WDC managed Apache binaries root.</summary>
+    public string BinariesRoot { get; set; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".wdc", "binaries", "apache");
 
     public string ExecutablePath { get; set; } = "httpd";
     public string ServerRoot { get; set; } = string.Empty;
@@ -24,35 +24,6 @@ public sealed class ApacheConfig
     public int HttpPort { get; set; } = 80;
     public int HttpsPort { get; set; } = 443;
     public int GracefulTimeoutSecs { get; set; } = 30;
-
-    /// <summary>
-    /// Applies MAMP defaults when ServerRoot/ExecutablePath are not explicitly configured.
-    /// </summary>
-    public void ApplyMampDefaults()
-    {
-        if (!Directory.Exists(MampRoot))
-            return;
-
-        var mampHttpd = Path.Combine(MampRoot, "bin", "apache", "bin", "httpd.exe");
-        if (File.Exists(mampHttpd) && (ExecutablePath == "httpd" || string.IsNullOrEmpty(ExecutablePath)))
-            ExecutablePath = mampHttpd;
-
-        var mampServerRoot = Path.Combine(MampRoot, "bin", "apache");
-        if (Directory.Exists(mampServerRoot) && string.IsNullOrEmpty(ServerRoot))
-            ServerRoot = mampServerRoot;
-
-        var mampConfDir = Path.Combine(MampRoot, "conf", "apache");
-        if (Directory.Exists(mampConfDir) && ConfigFile == "conf/httpd.conf")
-            ConfigFile = Path.Combine(mampConfDir, "httpd.conf");
-
-        var mampLogDir = Path.Combine(MampRoot, "logs");
-        if (Directory.Exists(mampLogDir) && LogDirectory == "logs")
-            LogDirectory = mampLogDir;
-
-        var sitesDir = Path.Combine(mampConfDir, "sites-enabled");
-        if (VhostsDirectory == "conf/sites-enabled")
-            VhostsDirectory = sitesDir;
-    }
 }
 
 /// <summary>
@@ -108,37 +79,43 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
 
     public async Task InitializeAsync(CancellationToken ct)
     {
-        // PRIORITY 1: Our own Apache binary at %USERPROFILE%\.wdc\binaries\apache
-        if (OperatingSystem.IsWindows())
+        // Pick the highest installed Apache version under ~/.wdc/binaries/apache/{version}/
+        if (!Directory.Exists(_config.BinariesRoot))
         {
-            var ownBinaryRoot = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".wdc", "binaries", "apache");
-            var ownHttpd = Path.Combine(ownBinaryRoot, "bin", "httpd.exe");
-
-            if (File.Exists(ownHttpd))
-            {
-                _config.ExecutablePath = ownHttpd;
-                _config.ServerRoot = ownBinaryRoot;
-                _config.ConfigFile = Path.Combine(ownBinaryRoot, "conf", "httpd.conf");
-                _config.LogDirectory = Path.Combine(ownBinaryRoot, "logs");
-                _config.VhostsDirectory = Path.Combine(ownBinaryRoot, "conf", "sites-enabled");
-
-                Directory.CreateDirectory(_config.VhostsDirectory);
-                Directory.CreateDirectory(_config.LogDirectory);
-
-                // DYNAMICALLY generate httpd.conf from Scriban template
-                await GenerateMainConfigAsync(ct);
-
-                _logger.LogInformation("Using own Apache binary: {Path}", ownHttpd);
-                return;
-            }
+            _logger.LogWarning(
+                "No Apache installed under {Root}. Install with POST /api/binaries/install " +
+                "{{ \"app\": \"apache\", \"version\": \"2.4.66\" }}",
+                _config.BinariesRoot);
+            return;
         }
 
-        // No own binary — fail with clear message
-        _logger.LogError("Apache binary not found at {Path}. Install via NKS WDC settings.",
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".wdc", "binaries", "apache", "bin", "httpd.exe"));
+        var versionDirs = Directory.GetDirectories(_config.BinariesRoot)
+            .Where(d => !Path.GetFileName(d).StartsWith('.'))
+            .OrderByDescending(d => d, StringComparer.Ordinal)
+            .ToList();
+
+        foreach (var versionDir in versionDirs)
+        {
+            var ownHttpd = Path.Combine(versionDir, "bin", "httpd.exe");
+            if (!File.Exists(ownHttpd)) continue;
+
+            _config.ExecutablePath = ownHttpd;
+            _config.ServerRoot = versionDir;
+            _config.ConfigFile = Path.Combine(versionDir, "conf", "httpd.conf");
+            _config.LogDirectory = Path.Combine(versionDir, "logs");
+            _config.VhostsDirectory = Path.Combine(versionDir, "conf", "sites-enabled");
+
+            Directory.CreateDirectory(_config.VhostsDirectory);
+            Directory.CreateDirectory(_config.LogDirectory);
+
+            // DYNAMICALLY generate httpd.conf from Scriban template
+            await GenerateMainConfigAsync(ct);
+
+            _logger.LogInformation("Apache binary detected: {Path} ({Version})", ownHttpd, Path.GetFileName(versionDir));
+            return;
+        }
+
+        _logger.LogWarning("No httpd.exe found under any version dir in {Root}", _config.BinariesRoot);
     }
 
     /// <summary>
@@ -195,21 +172,38 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
                 phpPort = 9000 + parsed;
         }
 
-        // Resolve php-cgi.exe path for mod_fcgid FcgidWrapper (Windows MAMP layout)
+        // Resolve php-cgi.exe from NKS WDC managed binaries: ~/.wdc/binaries/php/{version}/php-cgi.exe
+        // We accept either an exact match (8.4.20) or a major.minor prefix match (8.4 → highest 8.4.* installed).
         string phpCgiPath = "";
         if (OperatingSystem.IsWindows() && !string.IsNullOrEmpty(site.PhpVersion) && site.PhpVersion != "none")
         {
-            var mampPhpDir = @"C:\MAMP\bin\php";
-            if (Directory.Exists(mampPhpDir))
+            var phpRoot = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".wdc", "binaries", "php");
+
+            if (Directory.Exists(phpRoot))
             {
-                var versionPrefix = "php" + site.PhpVersion;
-                var match = Directory.GetDirectories(mampPhpDir, versionPrefix + "*").FirstOrDefault();
-                if (match != null)
+                // Try exact match first, then prefix match
+                var requested = site.PhpVersion.TrimEnd('.');
+                var candidates = Directory.GetDirectories(phpRoot)
+                    .Where(d =>
+                    {
+                        var name = Path.GetFileName(d);
+                        return name == requested || name.StartsWith(requested + ".");
+                    })
+                    .OrderByDescending(d => d, StringComparer.Ordinal)
+                    .ToList();
+
+                foreach (var c in candidates)
                 {
-                    var cgi = Path.Combine(match, "php-cgi.exe");
-                    if (File.Exists(cgi)) phpCgiPath = cgi;
+                    var cgi = Path.Combine(c, "php-cgi.exe");
+                    if (File.Exists(cgi)) { phpCgiPath = cgi; break; }
                 }
             }
+
+            if (string.IsNullOrEmpty(phpCgiPath))
+                _logger.LogWarning("PHP {Version} not installed under {Root} for site {Domain}",
+                    site.PhpVersion, phpRoot, site.Domain);
         }
 
         var model = new
