@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>MySQL</title>
+  <!-- dolphin body -->
+  <path d="M6 38 C 10 28 18 18 28 16 C 38 14 48 18 52 24 C 54 28 52 34 46 38 C 52 40 54 46 50 50 C 44 54 34 52 28 48 C 22 52 12 50 8 44 C 6 42 4 40 6 38 Z"
+        fill="#00758f"/>
+  <!-- eye -->
+  <circle cx="44" cy="28" r="2.5" fill="#fff"/>
+  <circle cx="44.5" cy="28" r="1.2" fill="#000"/>
+  <!-- highlight -->
+  <path d="M10 38 C 14 32 22 26 32 26 C 40 26 46 30 48 34" stroke="#fff" stroke-width="1.5" fill="none" opacity="0.5"/>
+  <!-- fin -->
+  <path d="M40 14 L 44 8 L 48 16 Z" fill="#f29111"/>
+</svg>

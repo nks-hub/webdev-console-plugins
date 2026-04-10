@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Mailpit</title>
+  <rect x="6" y="14" width="52" height="36" rx="4" fill="#22c55e"/>
+  <path d="M6 18 L 32 38 L 58 18" stroke="#fff" stroke-width="2.5" fill="none" stroke-linejoin="round"/>
+  <path d="M6 48 L 24 32 M 58 48 L 40 32" stroke="#fff" stroke-width="1.5" fill="none" opacity="0.6"/>
+</svg>

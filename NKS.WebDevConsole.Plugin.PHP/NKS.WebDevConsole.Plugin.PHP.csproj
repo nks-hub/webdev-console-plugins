@@ -16,6 +16,7 @@
     <EmbeddedResource Include="Templates\php-fpm.conf.scriban" />
     <EmbeddedResource Include="Templates\php.ini.scriban" />
     <EmbeddedResource Include="Templates\php-shim.cmd.scriban" />
+    <EmbeddedResource Include="Resources\icon.svg" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\daemon\NKS.WebDevConsole.Plugin.SDK\NKS.WebDevConsole.Plugin.SDK.csproj" />
