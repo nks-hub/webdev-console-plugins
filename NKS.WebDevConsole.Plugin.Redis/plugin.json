@@ -1,0 +1,8 @@
+{
+  "id": "redis",
+  "name": "Redis",
+  "version": "1.0.0",
+  "description": "Redis in-memory cache server management",
+  "provides": ["service"],
+  "permissions": ["process.spawn", "network.listen"]
+}
