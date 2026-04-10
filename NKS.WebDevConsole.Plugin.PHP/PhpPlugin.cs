@@ -8,8 +8,9 @@ namespace NKS.WebDevConsole.Plugin.PHP;
 
 /// <summary>
 /// IWdcPlugin entry point for the PHP multi-version module.
-/// On startup, scans for MAMP (and other) PHP installations, logs results,
-/// and exposes a REST-friendly list of detected versions via <see cref="GetInstalledVersions"/>.
+/// Scans only NKS WDC managed binaries under <c>~/.wdc/binaries/php/&lt;version&gt;/</c>
+/// — never MAMP/XAMPP/WAMP/system installs — and exposes a REST-friendly list of
+/// detected versions via <see cref="GetInstalledVersions"/>.
 /// </summary>
 public sealed class PhpPlugin : IWdcPlugin
 {

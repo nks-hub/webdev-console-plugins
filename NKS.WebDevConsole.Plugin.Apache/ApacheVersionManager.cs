@@ -51,46 +51,29 @@ public sealed class ApacheVersionManager
     {
         var exe = OperatingSystem.IsWindows() ? "httpd.exe" : "httpd";
 
-        // 1. NKS WDC bundled copy
+        // NKS WDC RULE: only our own managed binaries under ~/.wdc/binaries/apache/
+        // are accepted. Never fall back to MAMP, XAMPP, WAMP, Apache Lounge, Homebrew,
+        // /usr/sbin or the system PATH — that would break portability and could pick
+        // up an unexpected httpd binary the user has no control over.
+
+        // 1. Bundled copy next to the daemon (portable mode / test fixtures)
         yield return Path.Combine(appDirectory, "apache", "bin", exe);
 
-        // 2. PATH entries
-        var pathVar = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-        foreach (var dir in pathVar.Split(Path.PathSeparator))
+        // 2. Managed binaries root: ~/.wdc/binaries/apache/<version>/
+        var managedRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".wdc", "binaries", "apache");
+        if (Directory.Exists(managedRoot))
         {
-            if (!string.IsNullOrWhiteSpace(dir))
-                yield return Path.Combine(dir.Trim(), exe);
-        }
-
-        if (OperatingSystem.IsWindows())
-        {
-            // MAMP installations
-            foreach (var drive in new[] { "C:\\", "D:\\" })
+            var versionDirs = Directory.GetDirectories(managedRoot)
+                .Where(d => !Path.GetFileName(d).StartsWith('.'))
+                .OrderByDescending(d => d, StringComparer.Ordinal);
+            foreach (var vdir in versionDirs)
             {
-                yield return Path.Combine(drive, "MAMP", "bin", "apache", "bin", exe);
+                yield return Path.Combine(vdir, "bin", exe);
+                // Some zip layouts nest httpd under Apache24/bin
+                yield return Path.Combine(vdir, "Apache24", "bin", exe);
             }
-
-            // Apache Lounge default install locations
-            foreach (var drive in new[] { "C:\\", "D:\\" })
-            {
-                yield return Path.Combine(drive, "Apache24", "bin", exe);
-                yield return Path.Combine(drive, "Apache2.4", "bin", exe);
-                yield return Path.Combine(drive, "wamp64", "bin", "apache", "apache2.4.58", "bin", exe);
-            }
-
-            // XAMPP
-            yield return @"C:\xampp\apache\bin\" + exe;
-        }
-        else if (OperatingSystem.IsMacOS())
-        {
-            yield return "/opt/homebrew/bin/" + exe;
-            yield return "/usr/local/bin/" + exe;
-            yield return "/usr/local/opt/httpd/bin/" + exe;
-        }
-        else
-        {
-            yield return "/usr/sbin/" + exe;
-            yield return "/usr/bin/" + exe;
         }
     }
 

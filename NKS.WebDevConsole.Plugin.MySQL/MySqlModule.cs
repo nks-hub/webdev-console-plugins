@@ -57,8 +57,10 @@ public sealed class MySqlConfig
 }
 
 /// <summary>
-/// Full IServiceModule implementation for MySQL (MAMP).
+/// Full IServiceModule implementation for MySQL.
 /// Manages process lifecycle, config validation, log streaming, and metrics.
+/// Works only with NKS WDC managed MySQL binaries under <c>~/.wdc/binaries/mysql/</c>
+/// — never touches MAMP / XAMPP / system installs.
 /// </summary>
 public sealed class MySqlModule : IServiceModule, IAsyncDisposable
 {
