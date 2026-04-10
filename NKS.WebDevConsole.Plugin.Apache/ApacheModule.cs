@@ -1,6 +1,6 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Threading.Channels;
 using CliWrap;
 using CliWrap.Buffered;
 using Microsoft.Extensions.Logging;
@@ -77,9 +77,9 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
     private int _restartCount;
     private readonly object _stateLock = new();
 
-    // Bounded ring-buffer for log lines — drops oldest when full
-    private readonly Channel<string> _logChannel = Channel.CreateBounded<string>(
-        new BoundedChannelOptions(2000) { FullMode = BoundedChannelFullMode.DropOldest });
+    private readonly List<string> _logBuffer = new();
+    private readonly object _logLock = new();
+    private const int MaxLogEntries = 2000;
 
     private readonly List<FileSystemWatcher> _logWatchers = new();
     private CancellationTokenSource? _watcherCts;
@@ -373,16 +373,14 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
 
     // ── IServiceModule: GetLogsAsync ─────────────────────────────────────────
 
-    public async Task<IReadOnlyList<string>> GetLogsAsync(int lines, CancellationToken ct)
+    public Task<IReadOnlyList<string>> GetLogsAsync(int lines, CancellationToken ct)
     {
-        var result = new List<string>(lines);
-        var reader = _logChannel.Reader;
-
-        // Drain up to `lines` entries without blocking
-        while (result.Count < lines && reader.TryRead(out var line))
-            result.Add(line);
-
-        return result;
+        lock (_logLock)
+        {
+            var skip = Math.Max(0, _logBuffer.Count - lines);
+            return Task.FromResult<IReadOnlyList<string>>(
+                _logBuffer.Skip(skip).Take(lines).ToList());
+        }
     }
 
     // ── Log streaming via FileSystemWatcher on log files ─────────────────────
@@ -405,14 +403,19 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
                 EnableRaisingEvents = true
             };
 
-            watcher.Changed += (_, e) => TailLogFile(e.FullPath);
+            var cts = _watcherCts;
+            watcher.Changed += (_, e) =>
+            {
+                if (cts is null || cts.IsCancellationRequested) return;
+                TailLogFile(e.FullPath);
+            };
             _logWatchers.Add(watcher);
         }
 
         _logger.LogDebug("Log watchers started on {Dir}", logDir);
     }
 
-    private readonly Dictionary<string, long> _logFilePositions = new();
+    private readonly ConcurrentDictionary<string, long> _logFilePositions = new();
 
     private void TailLogFile(string path)
     {
@@ -452,7 +455,12 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
 
     private void PublishLog(string line)
     {
-        _logChannel.Writer.TryWrite(line);
+        lock (_logLock)
+        {
+            _logBuffer.Add(line);
+            if (_logBuffer.Count > MaxLogEntries)
+                _logBuffer.RemoveAt(0);
+        }
     }
 
     // ── Process exit handler ─────────────────────────────────────────────────
@@ -509,7 +517,6 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         }
 
         _process?.Dispose();
-        _logChannel.Writer.TryComplete();
         _watcherCts?.Dispose();
     }
 }

@@ -57,6 +57,11 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
     private IReadOnlyList<PhpInstallation> _installations = [];
     private readonly ConcurrentDictionary<string, PhpRunningProcess> _running = new();
     private ServiceState _state = ServiceState.Stopped;
+    private readonly object _stateLock = new();
+
+    private readonly List<string> _logBuffer = new();
+    private readonly object _logLock = new();
+    private const int MaxLogEntries = 2000;
 
     /// <summary>All detected PHP installations after initialization.</summary>
     public IReadOnlyList<PhpInstallation> Installations => _installations;
@@ -140,13 +145,17 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
 
     public async Task StartAsync(CancellationToken ct)
     {
-        _state = ServiceState.Starting;
+        lock (_stateLock) _state = ServiceState.Starting;
+
         var tasks = _installations
             .Where(p => p.FpmExecutable is not null)
             .Select(p => StartVersionAsync(p, ct));
 
         await Task.WhenAll(tasks);
-        _state = _running.IsEmpty ? ServiceState.Crashed : ServiceState.Running;
+
+        lock (_stateLock)
+            _state = _running.IsEmpty ? ServiceState.Crashed : ServiceState.Running;
+
         _logger.LogInformation("PHP module started {Count} version(s)", _running.Count);
     }
 
@@ -154,10 +163,12 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
 
     public async Task StopAsync(CancellationToken ct)
     {
-        _state = ServiceState.Stopping;
+        lock (_stateLock) _state = ServiceState.Stopping;
+
         var tasks = _running.Keys.ToList().Select(v => StopVersionAsync(v, ct));
         await Task.WhenAll(tasks);
-        _state = ServiceState.Stopped;
+
+        lock (_stateLock) _state = ServiceState.Stopped;
     }
 
     // ── IServiceModule: ReloadAsync ──────────────────────────────────────────
@@ -226,15 +237,24 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
 
     // ── IServiceModule: GetLogsAsync ─────────────────────────────────────────
 
-    public async Task<IReadOnlyList<string>> GetLogsAsync(int lines, CancellationToken ct)
+    public Task<IReadOnlyList<string>> GetLogsAsync(int lines, CancellationToken ct)
     {
-        var result = new List<string>(lines);
-        foreach (var (_, rp) in _running)
+        lock (_logLock)
         {
-            while (result.Count < lines && rp.LogChannel.Reader.TryRead(out var line))
-                result.Add(line);
+            var skip = Math.Max(0, _logBuffer.Count - lines);
+            return Task.FromResult<IReadOnlyList<string>>(
+                _logBuffer.Skip(skip).Take(lines).ToList());
         }
-        return result;
+    }
+
+    private void PublishLog(string line)
+    {
+        lock (_logLock)
+        {
+            _logBuffer.Add(line);
+            if (_logBuffer.Count > MaxLogEntries)
+                _logBuffer.RemoveAt(0);
+        }
     }
 
     // ── Per-version start/stop ───────────────────────────────────────────────
@@ -267,12 +287,20 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
         process.OutputDataReceived += (_, e) =>
         {
             if (e.Data is not null)
-                logChannel.Writer.TryWrite(e.Data);
+            {
+                var msg = $"[PHP {php.MajorMinor}] {e.Data}";
+                logChannel.Writer.TryWrite(msg);
+                PublishLog(msg);
+            }
         };
         process.ErrorDataReceived += (_, e) =>
         {
             if (e.Data is not null)
-                logChannel.Writer.TryWrite($"[ERR] {e.Data}");
+            {
+                var msg = $"[PHP {php.MajorMinor} ERR] {e.Data}";
+                logChannel.Writer.TryWrite(msg);
+                PublishLog(msg);
+            }
         };
         process.EnableRaisingEvents = true;
         process.Exited += (_, _) =>

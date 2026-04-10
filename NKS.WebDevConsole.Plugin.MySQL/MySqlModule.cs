@@ -1,6 +1,6 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Threading.Channels;
 using CliWrap;
 using CliWrap.Buffered;
 using Microsoft.Extensions.Logging;
@@ -70,12 +70,13 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
     private int _restartCount;
     private readonly object _stateLock = new();
 
-    private readonly Channel<string> _logChannel = Channel.CreateBounded<string>(
-        new BoundedChannelOptions(2000) { FullMode = BoundedChannelFullMode.DropOldest });
+    private readonly List<string> _logBuffer = new();
+    private readonly object _logLock = new();
+    private const int MaxLogEntries = 2000;
 
     private FileSystemWatcher? _logWatcher;
     private CancellationTokenSource? _watcherCts;
-    private readonly Dictionary<string, long> _logFilePositions = new();
+    private readonly ConcurrentDictionary<string, long> _logFilePositions = new();
 
     [DllImport("libc", SetLastError = true)]
     private static extern int kill(int pid, int sig);
@@ -301,15 +302,14 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
 
     // -- IServiceModule: GetLogsAsync --
 
-    public async Task<IReadOnlyList<string>> GetLogsAsync(int lines, CancellationToken ct)
+    public Task<IReadOnlyList<string>> GetLogsAsync(int lines, CancellationToken ct)
     {
-        var result = new List<string>(lines);
-        var reader = _logChannel.Reader;
-
-        while (result.Count < lines && reader.TryRead(out var line))
-            result.Add(line);
-
-        return result;
+        lock (_logLock)
+        {
+            var skip = Math.Max(0, _logBuffer.Count - lines);
+            return Task.FromResult<IReadOnlyList<string>>(
+                _logBuffer.Skip(skip).Take(lines).ToList());
+        }
     }
 
     // -- Log streaming via FileSystemWatcher --
@@ -331,7 +331,12 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
             EnableRaisingEvents = true
         };
 
-        _logWatcher.Changed += (_, e) => TailLogFile(e.FullPath);
+        var cts = _watcherCts;
+        _logWatcher.Changed += (_, e) =>
+        {
+            if (cts is null || cts.IsCancellationRequested) return;
+            TailLogFile(e.FullPath);
+        };
         _logger.LogDebug("MySQL log watcher started on {Dir}", logDir);
     }
 
@@ -373,7 +378,12 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
 
     private void PublishLog(string line)
     {
-        _logChannel.Writer.TryWrite(line);
+        lock (_logLock)
+        {
+            _logBuffer.Add(line);
+            if (_logBuffer.Count > MaxLogEntries)
+                _logBuffer.RemoveAt(0);
+        }
     }
 
     // -- Process exit handler --
@@ -447,7 +457,6 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
         }
 
         _process?.Dispose();
-        _logChannel.Writer.TryComplete();
         _watcherCts?.Dispose();
     }
 }
