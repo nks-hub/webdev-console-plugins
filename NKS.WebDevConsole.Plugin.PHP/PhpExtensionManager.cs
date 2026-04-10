@@ -107,6 +107,46 @@ public sealed class PhpExtensionManager
         => CoreExtensions.Contains(name);
 
     /// <summary>
+    /// Default set of dev extensions — enabled if the corresponding .dll/.so file exists in ext dir.
+    /// Commonly needed by PHP frameworks (Nette, Laravel, Symfony, WordPress, etc.).
+    /// Built-in modules (ctype, dom, iconv, json, mbstring on some builds, session, tokenizer,
+    /// xml family, zlib, hash, pcre, pdo, simplexml, spl) are already loaded into php.exe and
+    /// do not need explicit "extension=" directives — listing them here is harmless on Windows
+    /// (PHP ignores duplicate loads of statically linked modules).
+    /// </summary>
+    private static readonly string[] DefaultDevExtensions =
+    [
+        // Database drivers — pdo_mysql is HARD requirement of nette/database
+        "pdo_mysql", "mysqli", "pdo_sqlite", "sqlite3", "pdo_pgsql", "pgsql",
+        // Networking / IO
+        "curl", "openssl", "sockets", "ftp", "ldap", "soap",
+        // String / charset
+        "mbstring", "intl", "gettext",
+        // Files / mime / images / archives
+        "fileinfo", "gd", "exif", "zip", "bz2", "xsl",
+        // Crypto / math
+        "sodium", "gmp", "bcmath", "calendar",
+        // HTML / output
+        "tidy",
+    ];
+
+    /// <summary>
+    /// Returns the list of extensions to enable by default in php.ini for the given installation,
+    /// filtered to only those actually present in the ext directory.
+    /// </summary>
+    public IReadOnlyList<(string Name, bool Enabled)> GetDefaultEnabledExtensions(PhpInstallation php)
+    {
+        var available = GetAvailableExtensionFiles(php.ExecutablePath)
+            .Select(ExtractExtensionName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return DefaultDevExtensions
+            .Where(name => available.Contains(name))
+            .Select(name => (name, true))
+            .ToList();
+    }
+
+    /// <summary>
     /// Returns the xdebug .so/.dll path for the given PHP installation, if present.
     /// </summary>
     public string? FindXdebugSo(PhpInstallation php)

@@ -98,14 +98,20 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
         // Generate php.ini for all detected versions
         foreach (var php in _installations)
         {
+            var defaultExts = _extensionManager.GetDefaultEnabledExtensions(php);
+
             var opts = new PhpIniOptions(
                 Version: php.Version,
                 Profile: PhpIniProfile.Development,
                 Mode: PhpIniMode.Web,
                 ExtDir: Path.Combine(Path.GetDirectoryName(php.ExecutablePath)!, "ext"),
                 ErrorLog: Path.Combine(_config.LogDirectory, $"php{php.MajorMinor}-errors.log"),
-                TmpDir: Path.GetTempPath()
+                TmpDir: Path.GetTempPath(),
+                Extensions: defaultExts
             );
+
+            _logger.LogInformation("PHP {Version}: enabling {Count} default extensions ({Names})",
+                php.Version, defaultExts.Count, string.Join(", ", defaultExts.Select(e => e.Name)));
 
             // Detect xdebug
             var xdebugSo = _extensionManager.FindXdebugSo(php);
@@ -229,7 +235,7 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
         }
 
         var status = new ServiceStatus(
-            "php-cgi", "PHP-CGI", _state, firstPid, totalCpu, totalMemory,
+            ServiceId, DisplayName, _state, firstPid, totalCpu, totalMemory,
             _running.IsEmpty ? TimeSpan.Zero : DateTime.UtcNow - _running.Values.First().StartTime);
 
         return Task.FromResult(status);
