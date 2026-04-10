@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using Microsoft.Extensions.DependencyInjection;
@@ -56,9 +57,10 @@ public sealed class HostsPlugin : IWdcPlugin
     }
 
     /// <summary>
-    /// Adds a domain entry to the managed block (dry-run: logs the result, does not write).
+    /// Adds a domain entry to the managed block and writes the hosts file.
+    /// Falls back to dry-run logging if not running elevated.
     /// </summary>
-    public string? AddEntry(string domain, string ip = "127.0.0.1")
+    public async Task<string?> AddEntry(string domain, string ip = "127.0.0.1")
     {
         if (_manager is null) return null;
 
@@ -69,28 +71,32 @@ public sealed class HostsPlugin : IWdcPlugin
             return null;
         }
 
-        var domains = entries.Select(e => e.Domain).Append(domain).ToList();
+        var allDomains = entries.Select(e => e.Domain).Append(domain).Distinct().ToList();
         var currentContent = File.Exists(_manager.HostsPath)
-            ? File.ReadAllText(_manager.HostsPath)
+            ? await File.ReadAllTextAsync(_manager.HostsPath)
             : string.Empty;
 
-        var updated = _manager.BuildUpdatedContent(currentContent, domains, ip);
+        var updated = _manager.BuildUpdatedContent(currentContent, allDomains, ip);
 
-        if (!IsRunningAsAdmin())
+        try
         {
-            _logger?.LogWarning("Cannot write hosts file without elevation. Prepared content logged below.");
+            await File.WriteAllTextAsync(_manager.HostsPath, updated);
+            _logger?.LogInformation("Added {Domain} to hosts file", domain);
+            try { Process.Start("ipconfig", "/flushdns")?.WaitForExit(5000); } catch { }
         }
-
-        _logger?.LogInformation("Prepared hosts file content for adding {Domain}:\n{Content}", domain, updated);
-        LogFlushDnsReminder();
+        catch (UnauthorizedAccessException)
+        {
+            _logger?.LogWarning("Cannot write hosts file — elevation required. Content prepared but not written.");
+        }
 
         return updated;
     }
 
     /// <summary>
-    /// Removes a domain entry from the managed block (dry-run: logs the result, does not write).
+    /// Removes a domain entry from the managed block and writes the hosts file.
+    /// Falls back to dry-run logging if not running elevated.
     /// </summary>
-    public string? RemoveEntry(string domain)
+    public async Task<string?> RemoveEntry(string domain)
     {
         if (_manager is null) return null;
 
@@ -107,13 +113,21 @@ public sealed class HostsPlugin : IWdcPlugin
         }
 
         var currentContent = File.Exists(_manager.HostsPath)
-            ? File.ReadAllText(_manager.HostsPath)
+            ? await File.ReadAllTextAsync(_manager.HostsPath)
             : string.Empty;
 
         var updated = _manager.BuildUpdatedContent(currentContent, filtered);
 
-        _logger?.LogInformation("Prepared hosts file content after removing {Domain}:\n{Content}", domain, updated);
-        LogFlushDnsReminder();
+        try
+        {
+            await File.WriteAllTextAsync(_manager.HostsPath, updated);
+            _logger?.LogInformation("Removed {Domain} from hosts file", domain);
+            try { Process.Start("ipconfig", "/flushdns")?.WaitForExit(5000); } catch { }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            _logger?.LogWarning("Cannot write hosts file — elevation required. Content prepared but not written.");
+        }
 
         return updated;
     }
@@ -136,8 +150,4 @@ public sealed class HostsPlugin : IWdcPlugin
         return principal.IsInRole(WindowsBuiltInRole.Administrator);
     }
 
-    private void LogFlushDnsReminder()
-    {
-        _logger?.LogInformation("After writing, flush DNS cache with: ipconfig /flushdns");
-    }
 }
