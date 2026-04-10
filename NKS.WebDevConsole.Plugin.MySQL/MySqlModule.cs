@@ -289,8 +289,9 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
                 _process.Refresh();
                 memory = _process.WorkingSet64;
                 uptime = _startTime.HasValue ? DateTime.UtcNow - _startTime.Value : TimeSpan.Zero;
-                cpu = _process.TotalProcessorTime.TotalMilliseconds /
-                      (Environment.ProcessorCount * uptime.TotalMilliseconds) * 100;
+                cpu = uptime.TotalMilliseconds > 0
+                    ? _process.TotalProcessorTime.TotalMilliseconds / (Environment.ProcessorCount * uptime.TotalMilliseconds) * 100
+                    : 0;
             }
             catch { /* process may have exited between check and Refresh() */ }
         }

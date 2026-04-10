@@ -209,8 +209,9 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
                 rp.Process.Refresh();
                 totalMemory += rp.Process.WorkingSet64;
                 var uptime = (DateTime.UtcNow - rp.StartTime).TotalMilliseconds;
-                totalCpu += rp.Process.TotalProcessorTime.TotalMilliseconds /
-                            (Environment.ProcessorCount * uptime) * 100;
+                totalCpu += uptime > 0
+                    ? rp.Process.TotalProcessorTime.TotalMilliseconds / (Environment.ProcessorCount * uptime) * 100
+                    : 0;
                 firstPid ??= rp.Process.Id;
             }
             catch { /* process may have died */ }

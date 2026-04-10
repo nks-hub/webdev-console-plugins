@@ -361,8 +361,9 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
                 memory = _process.WorkingSet64;
                 uptime = _startTime.HasValue ? DateTime.UtcNow - _startTime.Value : TimeSpan.Zero;
                 // CPU % requires two samples; use TotalProcessorTime delta in production
-                cpu = _process.TotalProcessorTime.TotalMilliseconds /
-                      (Environment.ProcessorCount * uptime.TotalMilliseconds) * 100;
+                cpu = uptime.TotalMilliseconds > 0
+                    ? _process.TotalProcessorTime.TotalMilliseconds / (Environment.ProcessorCount * uptime.TotalMilliseconds) * 100
+                    : 0;
             }
             catch { /* process may have exited between check and Refresh() */ }
         }
