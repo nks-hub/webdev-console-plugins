@@ -422,6 +422,7 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
 
         var process = new Process { StartInfo = psi };
         process.Start();
+        NKS.WebDevConsole.Core.Services.DaemonJobObject.AssignProcess(process);
         return process;
     }
 
@@ -445,6 +446,7 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
 
         var process = new Process { StartInfo = psi };
         process.Start();
+        NKS.WebDevConsole.Core.Services.DaemonJobObject.AssignProcess(process);
         return process;
     }
 

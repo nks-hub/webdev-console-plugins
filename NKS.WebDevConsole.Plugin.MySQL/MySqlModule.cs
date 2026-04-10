@@ -198,6 +198,7 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
         _process.Exited += OnProcessExited;
 
         _process.Start();
+        NKS.WebDevConsole.Core.Services.DaemonJobObject.AssignProcess(_process);
         _process.BeginOutputReadLine();
         _process.BeginErrorReadLine();
 
