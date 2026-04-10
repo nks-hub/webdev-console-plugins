@@ -1,0 +1,18 @@
+{
+  "id": "nks.wdc.ssl",
+  "displayName": "SSL (mkcert)",
+  "version": "1.0.0",
+  "description": "SSL certificate management via mkcert. Local CA installation, per-domain certificate generation, and certificate lifecycle management.",
+  "author": "NKS",
+  "license": "Apache-2.0",
+  "entryAssembly": "NKS.WebDevConsole.Plugin.SSL.dll",
+  "entryType": "NKS.WebDevConsole.Plugin.SSL.SslPlugin",
+  "serviceType": "Other",
+  "supportedPlatforms": ["windows", "macos", "linux"],
+  "minDaemonVersion": "1.0.0",
+  "dependencies": [],
+  "capabilities": [
+    "install-ca", "generate-cert", "revoke-cert",
+    "list-certs", "mkcert-detection"
+  ]
+}
