@@ -1,0 +1,8 @@
+{
+  "id": "mailpit",
+  "name": "Mailpit",
+  "version": "1.0.0",
+  "description": "Mailpit SMTP testing server with Web UI",
+  "provides": ["service"],
+  "permissions": ["process.spawn", "network.listen"]
+}

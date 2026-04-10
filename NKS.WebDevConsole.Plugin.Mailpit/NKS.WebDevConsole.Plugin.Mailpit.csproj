@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>NKS.WebDevConsole.Plugin.Mailpit</AssemblyName>
+    <RootNamespace>NKS.WebDevConsole.Plugin.Mailpit</RootNamespace>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="CliWrap" Version="3.10.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\daemon\NKS.WebDevConsole.Plugin.SDK\NKS.WebDevConsole.Plugin.SDK.csproj" />
+  </ItemGroup>
+</Project>
