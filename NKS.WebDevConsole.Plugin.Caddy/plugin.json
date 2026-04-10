@@ -1,0 +1,20 @@
+{
+  "id": "nks.wdc.caddy",
+  "displayName": "Caddy",
+  "version": "1.0.0",
+  "description": "Caddy web server service module — alternative to Apache with automatic HTTPS. Manages caddy lifecycle and Caddyfile generation.",
+  "author": "NKS",
+  "license": "Apache-2.0",
+  "entryAssembly": "NKS.WebDevConsole.Plugin.Caddy.dll",
+  "entryType": "NKS.WebDevConsole.Plugin.Caddy.CaddyPlugin",
+  "serviceId": "caddy",
+  "serviceType": "WebServer",
+  "defaultPorts": [2015, 2019],
+  "supportedPlatforms": ["windows", "macos", "linux"],
+  "minDaemonVersion": "1.0.0",
+  "dependencies": [],
+  "capabilities": [
+    "start", "stop", "reload", "validate-config",
+    "vhost-generation", "log-streaming", "health-check", "metrics"
+  ]
+}
