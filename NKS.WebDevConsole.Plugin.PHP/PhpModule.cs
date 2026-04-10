@@ -58,6 +58,9 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
     private readonly ConcurrentDictionary<string, PhpRunningProcess> _running = new();
     private ServiceState _state = ServiceState.Stopped;
 
+    /// <summary>All detected PHP installations after initialization.</summary>
+    public IReadOnlyList<PhpInstallation> Installations => _installations;
+
     [DllImport("libc", SetLastError = true)]
     private static extern int kill(int pid, int sig);
     private const int SIGQUIT = 3;

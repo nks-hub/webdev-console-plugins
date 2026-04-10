@@ -8,6 +8,8 @@ namespace NKS.WebDevConsole.Plugin.PHP;
 
 /// <summary>
 /// IWdcPlugin entry point for the PHP multi-version module.
+/// On startup, scans for MAMP (and other) PHP installations, logs results,
+/// and exposes a REST-friendly list of detected versions via <see cref="GetInstalledVersions"/>.
 /// </summary>
 public sealed class PhpPlugin : IWdcPlugin
 {
@@ -16,6 +18,8 @@ public sealed class PhpPlugin : IWdcPlugin
     public string Version => "1.0.0";
 
     private PhpModule? _module;
+    private PhpVersionManager? _versionManager;
+    private IReadOnlyList<PhpInstallation> _installations = [];
 
     public void Initialize(IServiceCollection services, IPluginContext context)
     {
@@ -53,8 +57,24 @@ public sealed class PhpPlugin : IWdcPlugin
         var logger = context.GetLogger<PhpPlugin>();
         logger.LogInformation("PHP plugin v{Version} loaded", Version);
 
+        _versionManager = context.ServiceProvider.GetRequiredService<PhpVersionManager>();
         _module = context.ServiceProvider.GetRequiredService<PhpModule>();
         await _module.InitializeAsync(ct);
+
+        // Cache detected installations for REST queries
+        _installations = _module.Installations;
+
+        logger.LogInformation("PHP plugin detected {Count} version(s), active={Active}",
+            _installations.Count, _versionManager.ActiveVersion ?? "none");
+
+        foreach (var php in _installations)
+        {
+            logger.LogInformation("  PHP {Version} | exe={Exe} | cgi={Cgi} | ext={ExtCount} | port={Port}",
+                php.Version, php.ExecutablePath,
+                php.FpmExecutable ?? "(none)",
+                php.Extensions.Length,
+                php.FcgiPort);
+        }
     }
 
     public async Task StopAsync(CancellationToken ct)
@@ -62,4 +82,39 @@ public sealed class PhpPlugin : IWdcPlugin
         if (_module is not null)
             await _module.StopAsync(ct);
     }
+
+    /// <summary>
+    /// Returns a REST-friendly summary of all detected PHP installations.
+    /// </summary>
+    public IReadOnlyList<PhpVersionInfo> GetInstalledVersions()
+    {
+        return _installations.Select(php => new PhpVersionInfo(
+            php.Version,
+            php.MajorMinor,
+            php.ExecutablePath,
+            php.FpmExecutable,
+            php.Directory,
+            php.Extensions,
+            php.FcgiPort,
+            IsActive: php.MajorMinor == _versionManager?.ActiveVersion
+        )).ToList();
+    }
+
+    /// <summary>Sets the active PHP version for new sites.</summary>
+    public void SetActiveVersion(string majorMinor)
+    {
+        _versionManager?.SetActiveVersion(majorMinor);
+    }
 }
+
+/// <summary>REST-friendly DTO for a detected PHP version.</summary>
+public record PhpVersionInfo(
+    string Version,
+    string MajorMinor,
+    string PhpExePath,
+    string? PhpCgiPath,
+    string Directory,
+    string[] Extensions,
+    int FcgiPort,
+    bool IsActive
+);
