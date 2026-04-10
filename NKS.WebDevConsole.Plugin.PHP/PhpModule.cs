@@ -231,24 +231,9 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
 
     public Task<ServiceStatus> GetStatusAsync(CancellationToken ct)
     {
-        long totalMemory = 0;
-        double totalCpu = 0;
-        int? firstPid = null;
-
-        foreach (var (_, rp) in _running)
-        {
-            try
-            {
-                rp.Process.Refresh();
-                totalMemory += rp.Process.WorkingSet64;
-                var uptime = (DateTime.UtcNow - rp.StartTime).TotalMilliseconds;
-                totalCpu += uptime > 0
-                    ? rp.Process.TotalProcessorTime.TotalMilliseconds / (Environment.ProcessorCount * uptime) * 100
-                    : 0;
-                firstPid ??= rp.Process.Id;
-            }
-            catch { /* process may have died */ }
-        }
+        int? firstPid = _running.IsEmpty ? null : _running.Values.First().Process.Id;
+        var (totalCpu, totalMemory) = NKS.WebDevConsole.Core.Services.ProcessMetricsSampler.SampleMany(
+            _running.Values.Select(rp => rp.Process));
 
         var status = new ServiceStatus(
             ServiceId, DisplayName, _state, firstPid, totalCpu, totalMemory,

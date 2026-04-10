@@ -230,23 +230,8 @@ public sealed class MailpitModule : IServiceModule, IAsyncDisposable
         int? pid;
         lock (_stateLock) { state = _state; pid = _process?.Id; }
 
-        double cpu = 0;
-        long memory = 0;
-        TimeSpan uptime = TimeSpan.Zero;
-
-        if (_process is not null && !_process.HasExited)
-        {
-            try
-            {
-                _process.Refresh();
-                memory = _process.WorkingSet64;
-                uptime = _startTime.HasValue ? DateTime.UtcNow - _startTime.Value : TimeSpan.Zero;
-                cpu = uptime.TotalMilliseconds > 0
-                    ? _process.TotalProcessorTime.TotalMilliseconds / (Environment.ProcessorCount * uptime.TotalMilliseconds) * 100
-                    : 0;
-            }
-            catch { /* process may have exited between check and Refresh() */ }
-        }
+        var (cpu, memory) = NKS.WebDevConsole.Core.Services.ProcessMetricsSampler.Sample(_process);
+        var uptime = _startTime.HasValue ? DateTime.UtcNow - _startTime.Value : TimeSpan.Zero;
 
         return Task.FromResult(new ServiceStatus("mailpit", "Mailpit", state, pid, cpu, memory, uptime));
     }
