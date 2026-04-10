@@ -64,6 +64,12 @@ public sealed class ApacheVersionManager
 
         if (OperatingSystem.IsWindows())
         {
+            // MAMP installations
+            foreach (var drive in new[] { "C:\\", "D:\\" })
+            {
+                yield return Path.Combine(drive, "MAMP", "bin", "apache", "bin", exe);
+            }
+
             // Apache Lounge default install locations
             foreach (var drive in new[] { "C:\\", "D:\\" })
             {
@@ -71,6 +77,9 @@ public sealed class ApacheVersionManager
                 yield return Path.Combine(drive, "Apache2.4", "bin", exe);
                 yield return Path.Combine(drive, "wamp64", "bin", "apache", "apache2.4.58", "bin", exe);
             }
+
+            // XAMPP
+            yield return @"C:\xampp\apache\bin\" + exe;
         }
         else if (OperatingSystem.IsMacOS())
         {
