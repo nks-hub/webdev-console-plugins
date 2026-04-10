@@ -105,6 +105,19 @@ public sealed class PhpPlugin : IWdcPlugin
     {
         _versionManager?.SetActiveVersion(majorMinor);
     }
+
+    /// <summary>Returns extensions for a specific PHP version (major.minor).</summary>
+    public async Task<IReadOnlyList<PhpExtension>> GetExtensionsForVersion(string version)
+    {
+        var php = _installations.FirstOrDefault(p =>
+            p.MajorMinor == version || p.Version == version || p.Version.StartsWith(version));
+        if (php == null) return Array.Empty<PhpExtension>();
+        var extManager = _module?.GetType()
+            .GetField("_extensionManager", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+            ?.GetValue(_module) as PhpExtensionManager;
+        if (extManager == null) return Array.Empty<PhpExtension>();
+        return await extManager.GetExtensionsAsync(php);
+    }
 }
 
 /// <summary>REST-friendly DTO for a detected PHP version.</summary>
