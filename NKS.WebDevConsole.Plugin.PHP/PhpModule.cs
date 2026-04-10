@@ -119,6 +119,22 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
                 opts = opts with { XdebugSo = xdebugSo };
 
             await _iniManager.WriteAllVariantsAsync(php, _config.ConfigBaseDirectory, opts, ct);
+
+            // Also write a copy of the Web php.ini next to php.exe so that mod_fcgid-spawned
+            // php-cgi.exe processes (which do NOT inherit our PHPRC) load it via the default
+            // search path: <php-exe-dir>/php.ini
+            try
+            {
+                var content = _iniManager.Render(opts);
+                var binaryIniPath = Path.Combine(Path.GetDirectoryName(php.ExecutablePath)!, "php.ini");
+                await File.WriteAllTextAsync(binaryIniPath, content, ct);
+                _logger.LogInformation("Wrote php.ini next to binary at {Path}", binaryIniPath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Failed to write php.ini next to binary for PHP {Version}: {Error}",
+                    php.Version, ex.Message);
+            }
         }
 
         await _aliasManager.CreateAllShimsAsync(
