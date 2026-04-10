@@ -332,6 +332,17 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
 
         _logger.LogInformation("Starting Apache on port {Port}...", _config.HttpPort);
 
+        // Kill orphan httpd processes that may hold the port
+        try
+        {
+            foreach (var proc in Process.GetProcessesByName("httpd"))
+            {
+                try { proc.Kill(); proc.WaitForExit(3000); _logger.LogInformation("Killed orphan httpd PID {Pid}", proc.Id); }
+                catch { /* already exited */ }
+            }
+        }
+        catch { /* ignore */ }
+
         var validation = await ValidateConfigAsync(ct);
         if (!validation.IsValid)
             throw new InvalidOperationException($"Config validation failed: {validation.ErrorMessage}");
