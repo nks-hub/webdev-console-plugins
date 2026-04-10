@@ -1,0 +1,18 @@
+{
+  "id": "nks.wdc.hosts",
+  "displayName": "Hosts Manager",
+  "version": "1.0.0",
+  "description": "Manages entries in the Windows hosts file within a delimited managed block. Supports adding, removing, and listing domain-to-IP mappings.",
+  "author": "NKS",
+  "license": "Apache-2.0",
+  "entryAssembly": "NKS.WebDevConsole.Plugin.Hosts.dll",
+  "entryType": "NKS.WebDevConsole.Plugin.Hosts.HostsPlugin",
+  "serviceType": "Other",
+  "supportedPlatforms": ["windows"],
+  "minDaemonVersion": "1.0.0",
+  "dependencies": [],
+  "capabilities": [
+    "add-entry", "remove-entry", "list-entries",
+    "managed-block", "dns-flush-reminder"
+  ]
+}
