@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NKS.WebDevConsole.Core.Interfaces;
+using NKS.WebDevConsole.Core.Services;
 
 namespace NKS.WebDevConsole.Plugin.SSL;
 
@@ -31,9 +32,7 @@ public sealed class SslPlugin : IWdcPlugin
 
         _mkcert = context.ServiceProvider.GetRequiredService<MkcertManager>();
 
-        _certsBaseDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".wdc", "ssl", "sites");
+        _certsBaseDir = Path.Combine(WdcPaths.SslRoot, "sites");
         Directory.CreateDirectory(_certsBaseDir);
 
         var detected = await _mkcert.DetectAsync();

@@ -5,6 +5,7 @@ using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using NKS.WebDevConsole.Core.Interfaces;
 using NKS.WebDevConsole.Core.Models;
+using NKS.WebDevConsole.Core.Services;
 
 namespace NKS.WebDevConsole.Plugin.Mailpit;
 
@@ -67,9 +68,7 @@ public sealed class MailpitModule : IServiceModule, IAsyncDisposable
             return;
 
         // Only look under NKS WDC managed binaries
-        var mailpitRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".wdc", "binaries", "mailpit");
+        var mailpitRoot = Path.Combine(WdcPaths.BinariesRoot, "mailpit");
 
         if (!Directory.Exists(mailpitRoot))
             return;

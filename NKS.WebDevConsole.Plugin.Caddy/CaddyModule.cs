@@ -5,6 +5,7 @@ using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using NKS.WebDevConsole.Core.Interfaces;
 using NKS.WebDevConsole.Core.Models;
+using NKS.WebDevConsole.Core.Services;
 
 namespace NKS.WebDevConsole.Plugin.Caddy;
 
@@ -59,9 +60,7 @@ public sealed class CaddyModule : IServiceModule, IAsyncDisposable
             _logger.LogWarning("caddy executable not found (expected under %USERPROFILE%/.wdc/binaries/caddy/<version>/)");
 
         // Ensure default Caddyfile exists
-        var caddyDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".wdc", "caddy");
+        var caddyDir = WdcPaths.CaddyRoot;
         Directory.CreateDirectory(caddyDir);
         _config.CaddyfilePath ??= Path.Combine(caddyDir, "Caddyfile");
         if (!File.Exists(_config.CaddyfilePath))
@@ -86,9 +85,7 @@ public sealed class CaddyModule : IServiceModule, IAsyncDisposable
             return;
 
         // Only look under NKS WDC managed binaries (NO MAMP / NO system-wide search per user rule)
-        var caddyRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".wdc", "binaries", "caddy");
+        var caddyRoot = Path.Combine(WdcPaths.BinariesRoot, "caddy");
 
         if (!Directory.Exists(caddyRoot)) return;
 

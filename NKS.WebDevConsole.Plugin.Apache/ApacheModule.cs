@@ -6,15 +6,14 @@ using CliWrap.Buffered;
 using Microsoft.Extensions.Logging;
 using NKS.WebDevConsole.Core.Interfaces;
 using NKS.WebDevConsole.Core.Models;
+using NKS.WebDevConsole.Core.Services;
 
 namespace NKS.WebDevConsole.Plugin.Apache;
 
 public sealed class ApacheConfig
 {
     /// <summary>NKS WDC managed Apache binaries root.</summary>
-    public string BinariesRoot { get; set; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".wdc", "binaries", "apache");
+    public string BinariesRoot { get; set; } = Path.Combine(WdcPaths.BinariesRoot, "apache");
 
     public string ExecutablePath { get; set; } = "httpd";
     public string ServerRoot { get; set; } = string.Empty;
@@ -177,9 +176,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         string phpCgiPath = "";
         if (OperatingSystem.IsWindows() && !string.IsNullOrEmpty(site.PhpVersion) && site.PhpVersion != "none")
         {
-            var phpRoot = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".wdc", "binaries", "php");
+            var phpRoot = Path.Combine(WdcPaths.BinariesRoot, "php");
 
             if (Directory.Exists(phpRoot))
             {
@@ -210,9 +207,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         string certPath = "", keyPath = "";
         if (site.SslEnabled)
         {
-            var sslDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".wdc", "ssl", "sites", site.Domain);
+            var sslDir = Path.Combine(WdcPaths.SslRoot, "sites", site.Domain);
             var cp = Path.Combine(sslDir, "cert.pem");
             var kp = Path.Combine(sslDir, "key.pem");
             if (File.Exists(cp) && File.Exists(kp))
@@ -273,9 +268,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
 
     private static bool HasAnySslCerts()
     {
-        var sslSitesDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".wdc", "ssl", "sites");
+        var sslSitesDir = Path.Combine(WdcPaths.SslRoot, "sites");
         if (!Directory.Exists(sslSitesDir)) return false;
         return Directory.GetDirectories(sslSitesDir)
             .Any(d => File.Exists(Path.Combine(d, "cert.pem")));

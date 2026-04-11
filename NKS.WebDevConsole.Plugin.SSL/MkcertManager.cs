@@ -1,6 +1,7 @@
 using CliWrap;
 using CliWrap.Buffered;
 using Microsoft.Extensions.Logging;
+using NKS.WebDevConsole.Core.Services;
 
 namespace NKS.WebDevConsole.Plugin.SSL;
 
@@ -26,9 +27,7 @@ public class MkcertManager
     public async Task<bool> DetectAsync()
     {
         // Priority 1: own binary under ~/.wdc/binaries/mkcert/
-        var mkcertRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".wdc", "binaries", "mkcert");
+        var mkcertRoot = Path.Combine(WdcPaths.BinariesRoot, "mkcert");
 
         if (Directory.Exists(mkcertRoot))
         {

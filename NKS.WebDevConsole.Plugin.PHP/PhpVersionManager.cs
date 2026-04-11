@@ -1,6 +1,7 @@
 using CliWrap;
 using CliWrap.Buffered;
 using Microsoft.Extensions.Logging;
+using NKS.WebDevConsole.Core.Services;
 
 namespace NKS.WebDevConsole.Plugin.PHP;
 
@@ -44,9 +45,7 @@ public sealed class PhpVersionManager
     public PhpVersionManager(ILogger<PhpVersionManager> logger)
     {
         _logger = logger;
-        BinariesRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".wdc", "binaries", "php");
+        BinariesRoot = Path.Combine(WdcPaths.BinariesRoot, "php");
     }
 
     public async Task<IReadOnlyList<PhpInstallation>> DetectAllAsync(

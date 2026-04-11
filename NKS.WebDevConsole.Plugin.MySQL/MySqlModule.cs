@@ -6,27 +6,22 @@ using CliWrap.Buffered;
 using Microsoft.Extensions.Logging;
 using NKS.WebDevConsole.Core.Interfaces;
 using NKS.WebDevConsole.Core.Models;
+using NKS.WebDevConsole.Core.Services;
 
 namespace NKS.WebDevConsole.Plugin.MySQL;
 
 public sealed class MySqlConfig
 {
     /// <summary>Root for NKS WDC managed MySQL installs.</summary>
-    public string BinariesRoot { get; set; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".wdc", "binaries", "mysql");
+    public string BinariesRoot { get; set; } = Path.Combine(WdcPaths.BinariesRoot, "mysql");
 
     /// <summary>Where this instance stores its datafiles. Default ~/.wdc/data/mysql.</summary>
-    public string DataDir { get; set; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".wdc", "data", "mysql");
+    public string DataDir { get; set; } = Path.Combine(WdcPaths.DataRoot, "mysql");
 
     public string? ExecutablePath { get; set; }
     public string? MysqladminPath { get; set; }
     public string? ConfigFile { get; set; }
-    public string LogDirectory { get; set; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".wdc", "logs", "mysql");
+    public string LogDirectory { get; set; } = Path.Combine(WdcPaths.LogsRoot, "mysql");
     public int Port { get; set; } = 3306;
     public int GracefulTimeoutSecs { get; set; } = 30;
 

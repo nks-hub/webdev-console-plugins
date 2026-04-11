@@ -8,6 +8,7 @@ using CliWrap.Buffered;
 using Microsoft.Extensions.Logging;
 using NKS.WebDevConsole.Core.Interfaces;
 using NKS.WebDevConsole.Core.Models;
+using NKS.WebDevConsole.Core.Services;
 
 namespace NKS.WebDevConsole.Plugin.Redis;
 
@@ -72,9 +73,7 @@ public sealed class RedisModule : IServiceModule, IAsyncDisposable
             return;
 
         // Only look under NKS WDC managed binaries
-        var redisRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".wdc", "binaries", "redis");
+        var redisRoot = Path.Combine(WdcPaths.BinariesRoot, "redis");
 
         if (!Directory.Exists(redisRoot))
             return;
@@ -102,9 +101,7 @@ public sealed class RedisModule : IServiceModule, IAsyncDisposable
                 _config.ExecutablePath = candidate;
                 var dir = Path.GetDirectoryName(candidate)!;
                 _config.CliPath ??= Path.Combine(dir, cliName);
-                _config.DataDir ??= Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".wdc", "data", "redis");
+                _config.DataDir ??= Path.Combine(WdcPaths.DataRoot, "redis");
                 Directory.CreateDirectory(_config.DataDir);
                 return;
             }

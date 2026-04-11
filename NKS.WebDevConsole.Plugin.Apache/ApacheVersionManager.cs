@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using CliWrap;
 using CliWrap.Buffered;
 using Microsoft.Extensions.Logging;
+using NKS.WebDevConsole.Core.Services;
 
 namespace NKS.WebDevConsole.Plugin.Apache;
 
@@ -60,9 +61,7 @@ public sealed class ApacheVersionManager
         yield return Path.Combine(appDirectory, "apache", "bin", exe);
 
         // 2. Managed binaries root: ~/.wdc/binaries/apache/<version>/
-        var managedRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".wdc", "binaries", "apache");
+        var managedRoot = Path.Combine(WdcPaths.BinariesRoot, "apache");
         if (Directory.Exists(managedRoot))
         {
             var versionDirs = Directory.GetDirectories(managedRoot)
