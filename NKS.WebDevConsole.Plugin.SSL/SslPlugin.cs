@@ -78,7 +78,25 @@ public sealed class SslPlugin : IWdcPlugin
             return null;
         }
 
-        var domainDir = Path.Combine(_certsBaseDir, domain);
+        // DEFENSE IN DEPTH: SiteManager.ValidateDomain rejects traversal
+        // sequences but SslPlugin is a public IWdcPlugin reachable via
+        // reflection — any future caller that skips ValidateDomain would
+        // otherwise let Path.Combine resolve outside _certsBaseDir. Verify
+        // the resolved path stays rooted under the certs base dir regardless
+        // of what `domain` contains.
+        if (string.IsNullOrWhiteSpace(domain) || domain.Contains("..") ||
+            domain.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        {
+            _logger?.LogError("Refusing to generate cert for invalid domain '{Domain}'", domain);
+            return null;
+        }
+        var certsBaseFull = Path.GetFullPath(_certsBaseDir);
+        var domainDir = Path.GetFullPath(Path.Combine(_certsBaseDir, domain));
+        if (!domainDir.StartsWith(certsBaseFull, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger?.LogError("Refusing to generate cert: resolved path '{Dir}' escapes certs base '{Base}'", domainDir, certsBaseFull);
+            return null;
+        }
         var result = await _mkcert.GenerateCertAsync(domain, aliases, domainDir);
 
         if (result is null)
@@ -114,9 +132,24 @@ public sealed class SslPlugin : IWdcPlugin
         var domainDir = Path.GetDirectoryName(info.CertPath);
         if (domainDir != null && Directory.Exists(domainDir))
         {
+            // Verify the directory we're about to recursively delete is rooted
+            // under the certs base. _certs is populated by ScanExistingCerts()
+            // which reads directory names from disk — a rogue symlink or
+            // manually-created folder could in theory point anywhere.
+            var certsBaseFull = Path.GetFullPath(_certsBaseDir);
+            var resolvedDir = Path.GetFullPath(domainDir);
+            if (!resolvedDir.StartsWith(certsBaseFull, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger?.LogError(
+                    "Refusing to revoke cert for '{Domain}': directory '{Dir}' escapes certs base '{Base}'",
+                    domain, resolvedDir, certsBaseFull);
+                _certs.Remove(domain);
+                return false;
+            }
+
             try
             {
-                Directory.Delete(domainDir, recursive: true);
+                Directory.Delete(resolvedDir, recursive: true);
                 _logger?.LogInformation("Deleted certificate directory for {Domain}", domain);
             }
             catch (Exception ex)
