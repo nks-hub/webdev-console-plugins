@@ -342,7 +342,9 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         {
             _logger.LogInformation("Starting Apache on port {Port}...", _config.HttpPort);
 
-            // Kill orphan httpd processes that may hold the port
+            // Kill orphan httpd processes from our own binary (leftover from a
+            // crashed prior daemon run) — safe because we're only killing
+            // processes we spawned.
             try
             {
                 foreach (var proc in Process.GetProcessesByName("httpd"))
@@ -352,6 +354,31 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
                 }
             }
             catch { /* ignore */ }
+
+            // SPEC §9 Port Conflict Detection: after killing our own orphans,
+            // check whether the primary port is STILL held (by MAMP, IIS,
+            // system Apache, etc.). Raise a clear error with owner info
+            // instead of letting httpd fail with a cryptic "make_sock: could
+            // not bind to address" that users can't diagnose.
+            var conflict = PortConflictDetector.CheckPort(_config.HttpPort);
+            if (conflict is not null)
+            {
+                var fallback = PortConflictDetector.SuggestFallback(_config.HttpPort);
+                var msg = conflict.ToUserMessage(fallback);
+                _logger.LogError("Apache cannot bind: {Msg}", msg);
+                throw new InvalidOperationException(msg);
+            }
+            if (_config.HttpsPort > 0)
+            {
+                var sslConflict = PortConflictDetector.CheckPort(_config.HttpsPort);
+                if (sslConflict is not null)
+                {
+                    var fallback = PortConflictDetector.SuggestFallback(_config.HttpsPort);
+                    var msg = sslConflict.ToUserMessage(fallback);
+                    _logger.LogError("Apache cannot bind SSL: {Msg}", msg);
+                    throw new InvalidOperationException(msg);
+                }
+            }
 
             var validation = await ValidateConfigAsync(ct);
             if (!validation.IsValid)
