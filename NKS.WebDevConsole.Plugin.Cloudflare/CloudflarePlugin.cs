@@ -57,7 +57,7 @@ public sealed class CloudflarePlugin : IWdcPlugin, IFrontendPanelProvider
 
     public PluginUiDefinition GetUiDefinition() =>
         new UiSchemaBuilder(Id)
-            .Category("Networking")
+            .Category("Tools")
             .Icon("el-icon-link")
             .AddServiceCard("cloudflare")
             .AddLogViewer("cloudflare")
@@ -67,4 +67,15 @@ public sealed class CloudflarePlugin : IWdcPlugin, IFrontendPanelProvider
                 ["title"] = "Tunnel & DNS",
             })
             .Build();
+
+    /// <inheritdoc />
+    public string Description =>
+        "Cloudflare Tunnel plugin — exposes local sites to the internet through "
+        + "a secure encrypted tunnel without port-forwarding or a public IP. "
+        + "Runs cloudflared as a managed service, maps each WDC site to a public "
+        + "hostname via DNS records + ingress rules, and persists everything under "
+        + "~/.wdc/cloudflare/. Requires a Cloudflare account API token with "
+        + "Account > Cloudflare Tunnel > Edit, Zone > Zone > Read, and "
+        + "Zone > DNS > Edit scopes. See docs: "
+        + "https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/";
 }
