@@ -122,6 +122,13 @@ public sealed class MailpitModule : IServiceModule, IAsyncDisposable
         _logger.LogInformation("Starting Mailpit (SMTP:{SmtpPort}, Web:{WebPort})...",
             _config.SmtpPort, _config.WebPort);
 
+        // Kill any orphaned mailpit.exe processes left over from a previous
+        // daemon run — they would hold our ports (8025/1025) and cause the
+        // freshly-spawned mailpit to exit with code 1 the moment it tries to
+        // bind. Only touch processes whose executable path matches ours,
+        // never random mailpits installed elsewhere on the host.
+        KillOrphanedProcesses();
+
         var psi = BuildStartInfo();
         _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
 
@@ -269,6 +276,43 @@ public sealed class MailpitModule : IServiceModule, IAsyncDisposable
     private void PublishLog(string line)
     {
         _logChannel.Writer.TryWrite(line);
+    }
+
+    /// <summary>
+    /// Finds and terminates any orphaned mailpit.exe processes pointing at
+    /// the same managed binary we're about to spawn. Runs before StartAsync
+    /// to avoid "address already in use" failures caused by a previous daemon
+    /// run that exited without stopping its children. Processes belonging to
+    /// other mailpit installs are left alone.
+    /// </summary>
+    private void KillOrphanedProcesses()
+    {
+        if (string.IsNullOrEmpty(_config.ExecutablePath)) return;
+        Process[] existing;
+        try { existing = Process.GetProcessesByName("mailpit"); }
+        catch { return; }
+
+        foreach (var proc in existing)
+        {
+            try
+            {
+                var exePath = proc.MainModule?.FileName;
+                if (exePath is not null && string.Equals(exePath, _config.ExecutablePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogWarning("Killing orphaned mailpit.exe PID {Pid} from previous run", proc.Id);
+                    proc.Kill(entireProcessTree: true);
+                    proc.WaitForExit(2000);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Orphan kill skipped for PID {Pid}", proc.Id);
+            }
+            finally
+            {
+                proc.Dispose();
+            }
+        }
     }
 
     // -- Process exit handler --

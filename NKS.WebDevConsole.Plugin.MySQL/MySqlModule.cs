@@ -247,6 +247,11 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
 
         _logger.LogInformation("Starting MySQL on port {Port}...", _config.Port);
 
+        // Terminate any orphaned mysqld.exe processes from a previous daemon
+        // run that would hold port 3306 and starve the fresh spawn. Only our
+        // managed binary is in scope — system/MAMP mysqlds are untouched.
+        KillOrphanedProcesses();
+
         var psi = BuildStartInfo();
         _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
 
@@ -484,9 +489,45 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
 
     private void OnProcessExited(object? sender, EventArgs e)
     {
-        var exitCode = _process?.ExitCode ?? -1;
-        _logger.LogWarning("MySQL process exited with code {ExitCode}", exitCode);
+        var exitedPid = (sender as Process)?.Id ?? _process?.Id ?? -1;
+        var exitCode = (sender as Process)?.ExitCode ?? -1;
 
+        // MySQL 8.x on Windows uses an angel/child process model: the initial
+        // mysqld we spawned sometimes exits as soon as a child mysqld takes
+        // over the port, leaving _process referencing a dead PID. Before
+        // marking the service crashed, give mysqld a short grace period to
+        // rewrite its pidfile — if a live mysqld is recorded there, re-attach
+        // and keep the service Running. Otherwise it's a real crash.
+        lock (_stateLock)
+        {
+            if (_state == ServiceState.Stopping) return;
+        }
+
+        // Give mysqld up to 2s to finalise its pidfile hand-off.
+        var realProcess = WaitForPidFileHandoffAsync(exitedPid, TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
+        if (realProcess != null)
+        {
+            _logger.LogInformation(
+                "MySQL angel process exited (PID={OldPid} code={Code}) — re-attaching to real mysqld from pidfile (PID={NewPid})",
+                exitedPid, exitCode, realProcess.Id);
+            try
+            {
+                realProcess.EnableRaisingEvents = true;
+                realProcess.Exited += OnProcessExited;
+                NKS.WebDevConsole.Core.Services.DaemonJobObject.AssignProcess(realProcess);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Re-attach post-wiring failed");
+            }
+
+            var oldProcess = _process;
+            _process = realProcess;
+            try { oldProcess?.Dispose(); } catch { }
+            return;
+        }
+
+        _logger.LogWarning("MySQL process exited with code {ExitCode}", exitCode);
         lock (_stateLock)
         {
             if (_state != ServiceState.Stopping)
@@ -496,6 +537,24 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
                 _logger.LogError("MySQL crashed (restart #{Count})", _restartCount);
             }
         }
+    }
+
+    /// <summary>
+    /// Polls the MySQL pidfile for up to <paramref name="timeout"/> waiting for
+    /// it to point at a live mysqld process that is NOT the one that just
+    /// exited (<paramref name="exitedPid"/>). Returns the Process handle, or
+    /// null on timeout / no such process.
+    /// </summary>
+    private async Task<Process?> WaitForPidFileHandoffAsync(int exitedPid, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            var proc = TryAttachFromPidFile();
+            if (proc != null && proc.Id != exitedPid) return proc;
+            await Task.Delay(150);
+        }
+        return null;
     }
 
     // -- Helpers --
@@ -516,6 +575,81 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
             RedirectStandardError = true,
             CreateNoWindow = true
         };
+    }
+
+    /// <summary>
+    /// Finds and terminates any orphaned mysqld.exe processes pointing at
+    /// the same managed binary we're about to spawn. Prevents port 3306
+    /// conflicts caused by a previous daemon run that exited without stopping
+    /// its children. Processes from other mysqld installs (system/MAMP) are
+    /// left untouched.
+    /// </summary>
+    private void KillOrphanedProcesses()
+    {
+        if (string.IsNullOrEmpty(_config.ExecutablePath)) return;
+        Process[] existing;
+        try { existing = Process.GetProcessesByName("mysqld"); }
+        catch { return; }
+
+        foreach (var proc in existing)
+        {
+            try
+            {
+                var exePath = proc.MainModule?.FileName;
+                if (exePath is not null && string.Equals(exePath, _config.ExecutablePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogWarning("Killing orphaned mysqld.exe PID {Pid} from previous run", proc.Id);
+                    proc.Kill(entireProcessTree: true);
+                    proc.WaitForExit(3000);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Orphan kill skipped for PID {Pid}", proc.Id);
+            }
+            finally
+            {
+                proc.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reads the MySQL-written PID file from DataDir and returns a Process handle
+    /// to the still-running mysqld, or null if no live PID is recorded. Used to
+    /// recover after the spawned parent process exits under MySQL 8.x Windows's
+    /// angel/child process model.
+    /// </summary>
+    private Process? TryAttachFromPidFile()
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(_config.DataDir) || !Directory.Exists(_config.DataDir))
+                return null;
+
+            var pidFiles = Directory.GetFiles(_config.DataDir, "*.pid");
+            foreach (var pidFile in pidFiles)
+            {
+                if (!int.TryParse(File.ReadAllText(pidFile).Trim(), out var pid)) continue;
+                try
+                {
+                    var proc = Process.GetProcessById(pid);
+                    // Sanity-check: must be a mysqld process, not some recycled PID.
+                    if (proc.ProcessName.Equals("mysqld", StringComparison.OrdinalIgnoreCase)
+                        && !proc.HasExited)
+                    {
+                        return proc;
+                    }
+                }
+                catch (ArgumentException) { /* process no longer exists */ }
+                catch (InvalidOperationException) { /* already exited */ }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "TryAttachFromPidFile failed");
+        }
+        return null;
     }
 
     private static async Task<bool> WaitForPortAsync(int port, TimeSpan timeout, CancellationToken ct)
