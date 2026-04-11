@@ -117,6 +117,8 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
     /// <summary>
     /// Initialize the MySQL data directory on first start (mysqld --initialize-insecure).
     /// Idempotent: skips if data dir already contains a system tablespace.
+    /// First-init also generates a DPAPI-protected root password and stores it
+    /// (set on the running instance later by <see cref="SetRootPasswordIfNeededAsync"/>).
     /// </summary>
     private async Task EnsureDataDirInitializedAsync(CancellationToken ct)
     {
@@ -140,10 +142,73 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
             .ExecuteBufferedAsync(ct);
 
         if (result.ExitCode == 0)
+        {
             _logger.LogInformation("MySQL data dir initialized successfully");
+            // Generate the DPAPI-protected root password now so the next start can apply it.
+            var generated = NKS.WebDevConsole.Core.Services.MySqlRootPassword.EnsureExists();
+            _logger.LogInformation("Generated DPAPI-protected MySQL root password ({Length} chars)", generated.Length);
+            _needsPasswordSet = true;
+        }
         else
+        {
             _logger.LogError("MySQL --initialize-insecure failed (exit {Code}): {Err}",
                 result.ExitCode, result.StandardError.Trim());
+        }
+    }
+
+    /// <summary>True between <c>--initialize-insecure</c> and the first successful root SET PASSWORD.</summary>
+    private bool _needsPasswordSet;
+
+    /// <summary>
+    /// Right after the first start, while root is still passwordless, set the
+    /// DPAPI-stored password via mysql CLI: <c>mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '...'"</c>.
+    /// Called from <see cref="StartAsync"/> after the server reports ready.
+    /// </summary>
+    private async Task SetRootPasswordIfNeededAsync(CancellationToken ct)
+    {
+        if (!_needsPasswordSet) return;
+        if (string.IsNullOrEmpty(_config.ExecutablePath)) return;
+
+        var mysqlCli = Path.Combine(Path.GetDirectoryName(_config.ExecutablePath)!, "mysql.exe");
+        if (!File.Exists(mysqlCli))
+        {
+            _logger.LogWarning("mysql.exe not found next to mysqld — cannot set root password");
+            return;
+        }
+
+        var password = NKS.WebDevConsole.Core.Services.MySqlRootPassword.TryRead();
+        if (string.IsNullOrEmpty(password))
+        {
+            _logger.LogWarning("DPAPI password store empty — skipping SET PASSWORD");
+            return;
+        }
+
+        // SQL is parameter-free; the password is single-quoted with embedded quotes escaped.
+        var escaped = password.Replace("'", "''");
+        var sql = $"ALTER USER 'root'@'localhost' IDENTIFIED BY '{escaped}'; FLUSH PRIVILEGES;";
+        try
+        {
+            // Pass via -e (no shell interpretation thanks to CliWrap argument array)
+            var result = await Cli.Wrap(mysqlCli)
+                .WithArguments(new[] { "-h", "127.0.0.1", "-P", _config.Port.ToString(), "-u", "root", "-e", sql })
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync(ct);
+
+            if (result.ExitCode == 0)
+            {
+                _logger.LogInformation("MySQL root password applied (DPAPI-protected at rest)");
+                _needsPasswordSet = false;
+            }
+            else
+            {
+                _logger.LogWarning("SET PASSWORD failed (exit {Code}): {Err}",
+                    result.ExitCode, result.StandardError.Trim());
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SET PASSWORD threw");
+        }
     }
 
     // -- IServiceModule: ValidateConfigAsync --
@@ -215,6 +280,10 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
 
         lock (_stateLock) _state = ServiceState.Running;
         _logger.LogInformation("MySQL running (PID={Pid}, port={Port})", _process.Id, _config.Port);
+
+        // First-run hook: if --initialize-insecure just ran, root is still passwordless.
+        // Apply the DPAPI-stored password immediately so subsequent connections need it.
+        await SetRootPasswordIfNeededAsync(ct);
 
         StartLogFileWatcher();
     }
