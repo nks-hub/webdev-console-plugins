@@ -18,7 +18,12 @@ namespace NKS.WebDevConsole.Plugin.Cloudflare;
 /// </summary>
 public sealed class CloudflareApi
 {
-    private const string BaseUrl = "https://api.cloudflare.com/client/v4";
+    // Trailing slash is CRITICAL. HttpClient.BaseAddress + a relative URI
+    // starting with "/" replaces the entire path — e.g. "/zones" becomes
+    // https://api.cloudflare.com/zones (losing /client/v4). We use a
+    // trailing slash here AND feed relative paths WITHOUT a leading slash
+    // (see BuildRequest) so the two concatenate correctly.
+    private const string BaseUrl = "https://api.cloudflare.com/client/v4/";
 
     private readonly CloudflareConfig _config;
     private readonly ILogger<CloudflareApi> _logger;
@@ -37,7 +42,12 @@ public sealed class CloudflareApi
     {
         if (string.IsNullOrWhiteSpace(_config.ApiToken))
             throw new InvalidOperationException("Cloudflare API token is not configured.");
-        var req = new HttpRequestMessage(method, path);
+        // Strip any leading slash to work correctly with BaseAddress which
+        // keeps a trailing slash. See BaseUrl constant above for the full
+        // explanation. Without this, ".../client/v4/" + "/zones" collapses
+        // to "https://api.cloudflare.com/zones" → 404 "No route for that URI".
+        var trimmed = path.StartsWith('/') ? path[1..] : path;
+        var req = new HttpRequestMessage(method, trimmed);
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.ApiToken);
         return req;
     }
