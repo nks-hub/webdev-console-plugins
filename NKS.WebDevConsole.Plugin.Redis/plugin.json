@@ -2,7 +2,7 @@
   "id": "redis",
   "name": "Redis",
   "version": "1.0.0",
-  "description": "Redis in-memory cache server management",
+  "description": "Redis in-memory key-value store — session storage, queue broker, and application cache for local development. Manages redis-server lifecycle with a generated redis.conf (persistence disabled by default to keep ~/.wdc fast), graceful shutdown via redis-cli SHUTDOWN NOSAVE, and automatic port conflict detection. Default port: 6379.",
   "provides": ["service"],
   "permissions": ["process.spawn", "network.listen"]
 }

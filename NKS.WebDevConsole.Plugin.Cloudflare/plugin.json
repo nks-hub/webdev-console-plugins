@@ -1,0 +1,20 @@
+{
+  "id": "nks.wdc.cloudflare",
+  "displayName": "Cloudflare Tunnel",
+  "version": "1.0.0",
+  "description": "Cloudflare Tunnel plugin — runs cloudflared to expose local sites to the internet through a secure encrypted tunnel (no port-forwarding, no public IP). Manages tunnel lifecycle, DNS record routing via the Cloudflare API, and zone configuration. Settings: API token (with Account > Cloudflare Tunnel > Edit + Zone > DNS > Edit scopes), account ID, tunnel ID, tunnel token (JWT), and path to cloudflared binary.",
+  "author": "NKS",
+  "license": "Apache-2.0",
+  "entryAssembly": "NKS.WebDevConsole.Plugin.Cloudflare.dll",
+  "entryType": "NKS.WebDevConsole.Plugin.Cloudflare.CloudflarePlugin",
+  "serviceId": "cloudflare",
+  "serviceType": "Other",
+  "defaultPorts": [],
+  "supportedPlatforms": ["windows", "macos", "linux"],
+  "minDaemonVersion": "1.0.0",
+  "dependencies": [],
+  "capabilities": [
+    "start", "stop", "log-streaming", "health-check",
+    "api-passthrough", "dns-management", "tunnel-routing"
+  ]
+}

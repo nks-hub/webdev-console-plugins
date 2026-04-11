@@ -2,7 +2,7 @@
   "id": "mysql",
   "name": "MySQL",
   "version": "1.0.0",
-  "description": "MySQL database server management",
+  "description": "MySQL 8.x database server — manages mysqld lifecycle (start/stop/reload), generates my.ini from templates with sensible defaults for local development, auto-initializes the data directory on first run, protects the root password via DPAPI on Windows. Default port: 3306. Ships with a database browser panel for CREATE/DROP/dump operations.",
   "provides": ["service"],
   "permissions": ["process.spawn", "filesystem.read", "filesystem.write", "network.listen"]
 }

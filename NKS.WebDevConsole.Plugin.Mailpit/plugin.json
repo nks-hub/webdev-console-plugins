@@ -2,7 +2,7 @@
   "id": "mailpit",
   "name": "Mailpit",
   "version": "1.0.0",
-  "description": "Mailpit SMTP testing server with Web UI",
+  "description": "Mailpit SMTP test server — catches outgoing mail from your sites without actually delivering it. Provides a web UI (default port 8025) to inspect every message with full MIME body + attachments + HTML/text tabs. Ideal for testing registration flows, password resets, and templated emails locally. Default SMTP port: 1025.",
   "provides": ["service"],
   "permissions": ["process.spawn", "network.listen"]
 }
