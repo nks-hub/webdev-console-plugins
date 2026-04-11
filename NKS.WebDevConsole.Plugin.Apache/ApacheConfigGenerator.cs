@@ -111,11 +111,7 @@ public sealed class ApacheConfigGenerator
         var rendered = RenderVhost(model);
         var path = Path.Combine(vhostsDirectory, $"{model.Domain}.conf");
 
-        // Atomic write: write to temp, rename
-        var temp = path + ".tmp";
-        await File.WriteAllTextAsync(temp, rendered, ct);
-        File.Move(temp, path, overwrite: true);
-
+        await AtomicWriteAsync(path, rendered, ct);
         _logger.LogInformation("Wrote vhost config: {Path}", path);
     }
 
@@ -125,10 +121,23 @@ public sealed class ApacheConfigGenerator
         CancellationToken ct = default)
     {
         var rendered = RenderHttpdConf(model);
-        var temp = outputPath + ".tmp";
-        await File.WriteAllTextAsync(temp, rendered, ct);
-        File.Move(temp, outputPath, overwrite: true);
+        await AtomicWriteAsync(outputPath, rendered, ct);
         _logger.LogInformation("Wrote httpd.conf: {Path}", outputPath);
+    }
+
+    private static async Task AtomicWriteAsync(string targetPath, string content, CancellationToken ct)
+    {
+        var temp = targetPath + ".tmp";
+        try
+        {
+            await File.WriteAllTextAsync(temp, content, ct);
+            File.Move(temp, targetPath, overwrite: true);
+        }
+        catch
+        {
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { /* ignore */ }
+            throw;
+        }
     }
 
     private static Template LoadEmbeddedTemplate(string resourceName)
