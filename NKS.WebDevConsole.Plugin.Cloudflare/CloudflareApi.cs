@@ -298,12 +298,14 @@ public sealed class CloudflareApi
 
     /// <summary>
     /// Bind a hostname to a local service in the tunnel's ingress config.
-    /// Caller passes <c>{ hostname, service, httpHostHeader? }</c> tuples.
     /// <c>httpHostHeader</c> overrides the Host header cloudflared sends
     /// to the local origin — critical so Apache matches the LOCAL vhost
     /// (e.g. <c>blog.loc</c>) instead of the public name the visitor used
-    /// (<c>blog.nks-dev.cz</c>). The mandatory catch-all 404 rule is
-    /// appended automatically.
+    /// (<c>blog.nks-dev.cz</c>). When <c>originServerName</c> + <c>noTLSVerify</c>
+    /// are set, cloudflared hits the local service over HTTPS with the
+    /// given SNI but skips publicly-trusted cert validation — required
+    /// for mkcert-signed local certificates. The mandatory catch-all 404
+    /// rule is appended automatically.
     /// </summary>
     public async Task<JsonElement> UpdateTunnelIngressAsync(
         string tunnelId,
@@ -318,13 +320,21 @@ public sealed class CloudflareApi
         var ingress = new List<object>();
         foreach (var r in rules)
         {
+            var originRequest = new Dictionary<string, object>();
             if (!string.IsNullOrEmpty(r.HttpHostHeader))
+                originRequest["httpHostHeader"] = r.HttpHostHeader;
+            if (!string.IsNullOrEmpty(r.OriginServerName))
+                originRequest["originServerName"] = r.OriginServerName;
+            if (r.NoTLSVerify)
+                originRequest["noTLSVerify"] = true;
+
+            if (originRequest.Count > 0)
             {
                 ingress.Add(new
                 {
                     hostname = r.Hostname,
                     service = r.Service,
-                    originRequest = new { httpHostHeader = r.HttpHostHeader },
+                    originRequest,
                 });
             }
             else
@@ -340,4 +350,17 @@ public sealed class CloudflareApi
     }
 }
 
-public sealed record TunnelIngressRule(string Hostname, string Service, string? HttpHostHeader = null);
+/// <summary>
+/// A single tunnel ingress rule. For plain-HTTP sites use
+/// <c>(hostname, "http://localhost:80", httpHostHeader: domain)</c>. For
+/// local-TLS sites (mkcert-signed) use <c>(hostname, "https://localhost:443",
+/// httpHostHeader: domain, originServerName: domain, noTLSVerify: true)</c>
+/// so cloudflared bypasses the HTTP→HTTPS redirect by hitting the HTTPS
+/// vhost directly with the correct SNI.
+/// </summary>
+public sealed record TunnelIngressRule(
+    string Hostname,
+    string Service,
+    string? HttpHostHeader = null,
+    string? OriginServerName = null,
+    bool NoTLSVerify = false);
