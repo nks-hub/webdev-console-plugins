@@ -132,53 +132,67 @@ public sealed class RedisModule : IServiceModule, IAsyncDisposable
             _state = ServiceState.Starting;
         }
 
-        if (string.IsNullOrEmpty(_config.ExecutablePath))
-            throw new InvalidOperationException("redis-server executable not found.");
-
-        var validation = await ValidateConfigAsync(ct);
-        if (!validation.IsValid)
-            throw new InvalidOperationException($"Config validation failed: {validation.ErrorMessage}");
-
-        _logger.LogInformation("Starting Redis on port {Port}...", _config.Port);
-
-        // Terminate orphaned redis-server.exe processes from a prior daemon
-        // run so they don't steal port 6379 from the fresh spawn. Only our
-        // managed binary is affected — system Redis installs are untouched.
-        KillOrphanedProcesses();
-
-        var psi = BuildStartInfo();
-        _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
-
-        _process.OutputDataReceived += (_, e) =>
+        // Envelope: every early throw must reset _state so the Dashboard toggle
+        // doesn't get stuck in Starting. Same class of fix as Caddy/Apache/MySQL.
+        try
         {
-            if (e.Data is not null)
-                PublishLog(e.Data);
-        };
-        _process.ErrorDataReceived += (_, e) =>
-        {
-            if (e.Data is not null)
-                PublishLog($"[ERR] {e.Data}");
-        };
-        _process.Exited += OnProcessExited;
+            if (string.IsNullOrEmpty(_config.ExecutablePath))
+                throw new InvalidOperationException("redis-server executable not found.");
 
-        _process.Start();
-        NKS.WebDevConsole.Core.Services.DaemonJobObject.AssignProcess(_process);
-        _process.BeginOutputReadLine();
-        _process.BeginErrorReadLine();
+            var validation = await ValidateConfigAsync(ct);
+            if (!validation.IsValid)
+                throw new InvalidOperationException($"Config validation failed: {validation.ErrorMessage}");
 
-        _startTime = DateTime.UtcNow;
-        _logger.LogInformation("Redis PID {Pid} launched, waiting for port {Port}...",
-            _process.Id, _config.Port);
+            _logger.LogInformation("Starting Redis on port {Port}...", _config.Port);
 
-        var ready = await WaitForPortAsync(_config.Port, TimeSpan.FromSeconds(15), ct);
-        if (!ready)
-        {
-            lock (_stateLock) _state = ServiceState.Crashed;
-            throw new TimeoutException($"Redis did not bind to port {_config.Port} within 15 seconds.");
+            // Terminate orphaned redis-server.exe processes from a prior daemon
+            // run so they don't steal port 6379 from the fresh spawn. Only our
+            // managed binary is affected — system Redis installs are untouched.
+            KillOrphanedProcesses();
+
+            var psi = BuildStartInfo();
+            _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
+
+            _process.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data is not null)
+                    PublishLog(e.Data);
+            };
+            _process.ErrorDataReceived += (_, e) =>
+            {
+                if (e.Data is not null)
+                    PublishLog($"[ERR] {e.Data}");
+            };
+            _process.Exited += OnProcessExited;
+
+            _process.Start();
+            NKS.WebDevConsole.Core.Services.DaemonJobObject.AssignProcess(_process);
+            _process.BeginOutputReadLine();
+            _process.BeginErrorReadLine();
+
+            _startTime = DateTime.UtcNow;
+            _logger.LogInformation("Redis PID {Pid} launched, waiting for port {Port}...",
+                _process.Id, _config.Port);
+
+            var ready = await WaitForPortAsync(_config.Port, TimeSpan.FromSeconds(15), ct);
+            if (!ready)
+            {
+                lock (_stateLock) _state = ServiceState.Crashed;
+                throw new TimeoutException($"Redis did not bind to port {_config.Port} within 15 seconds.");
+            }
+
+            lock (_stateLock) _state = ServiceState.Running;
+            _logger.LogInformation("Redis running (PID={Pid}, port={Port})", _process.Id, _config.Port);
         }
-
-        lock (_stateLock) _state = ServiceState.Running;
-        _logger.LogInformation("Redis running (PID={Pid}, port={Port})", _process.Id, _config.Port);
+        catch
+        {
+            lock (_stateLock)
+            {
+                if (_state != ServiceState.Crashed)
+                    _state = ServiceState.Stopped;
+            }
+            throw;
+        }
     }
 
     // -- IServiceModule: StopAsync --

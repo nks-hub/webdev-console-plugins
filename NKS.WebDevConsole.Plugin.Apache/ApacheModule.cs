@@ -334,71 +334,87 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             _state = ServiceState.Starting;
         }
 
-        _logger.LogInformation("Starting Apache on port {Port}...", _config.HttpPort);
-
-        // Kill orphan httpd processes that may hold the port
+        // Ensure any early throw (config validation, process.Start failure, port
+        // bind timeout) leaves the state recoverable. Without this wrapper,
+        // _state stays at Starting forever and the Dashboard toggle gets stuck
+        // with a non-clickable spinner — same bug class as CaddyModule.
         try
         {
-            foreach (var proc in Process.GetProcessesByName("httpd"))
+            _logger.LogInformation("Starting Apache on port {Port}...", _config.HttpPort);
+
+            // Kill orphan httpd processes that may hold the port
+            try
             {
-                try { proc.Kill(); proc.WaitForExit(3000); _logger.LogInformation("Killed orphan httpd PID {Pid}", proc.Id); }
-                catch { /* already exited */ }
+                foreach (var proc in Process.GetProcessesByName("httpd"))
+                {
+                    try { proc.Kill(); proc.WaitForExit(3000); _logger.LogInformation("Killed orphan httpd PID {Pid}", proc.Id); }
+                    catch { /* already exited */ }
+                }
             }
-        }
-        catch { /* ignore */ }
+            catch { /* ignore */ }
 
-        var validation = await ValidateConfigAsync(ct);
-        if (!validation.IsValid)
-            throw new InvalidOperationException($"Config validation failed: {validation.ErrorMessage}");
+            var validation = await ValidateConfigAsync(ct);
+            if (!validation.IsValid)
+                throw new InvalidOperationException($"Config validation failed: {validation.ErrorMessage}");
 
-        var psi = BuildStartInfo();
-        _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
+            var psi = BuildStartInfo();
+            _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
 
-        _process.OutputDataReceived += (_, e) =>
-        {
-            if (e.Data is not null)
-                PublishLog(e.Data);
-        };
-        _process.ErrorDataReceived += (_, e) =>
-        {
-            if (e.Data is not null)
-                PublishLog($"[ERR] {e.Data}");
-        };
-        _process.Exited += OnProcessExited;
+            _process.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data is not null)
+                    PublishLog(e.Data);
+            };
+            _process.ErrorDataReceived += (_, e) =>
+            {
+                if (e.Data is not null)
+                    PublishLog($"[ERR] {e.Data}");
+            };
+            _process.Exited += OnProcessExited;
 
-        _process.Start();
-        NKS.WebDevConsole.Core.Services.DaemonJobObject.AssignProcess(_process);
-        _process.BeginOutputReadLine();
-        _process.BeginErrorReadLine();
+            _process.Start();
+            NKS.WebDevConsole.Core.Services.DaemonJobObject.AssignProcess(_process);
+            _process.BeginOutputReadLine();
+            _process.BeginErrorReadLine();
 
 #if WINDOWS
-        if (OperatingSystem.IsWindows())
-        {
-            _jobHandle = JobObjects.CreateKillOnCloseJob();
-            JobObjects.AssignProcess(_jobHandle, _process);
-        }
+            if (OperatingSystem.IsWindows())
+            {
+                _jobHandle = JobObjects.CreateKillOnCloseJob();
+                JobObjects.AssignProcess(_jobHandle, _process);
+            }
 #endif
 
-        _startTime = DateTime.UtcNow;
-        _logger.LogInformation("Apache PID {Pid} launched, waiting for port {Port}...",
-            _process.Id, _config.HttpPort);
+            _startTime = DateTime.UtcNow;
+            _logger.LogInformation("Apache PID {Pid} launched, waiting for port {Port}...",
+                _process.Id, _config.HttpPort);
 
-        var ready = await _healthChecker.WaitForReadyAsync(
-            _config.HttpPort,
-            TimeSpan.FromSeconds(15),
-            ct);
+            var ready = await _healthChecker.WaitForReadyAsync(
+                _config.HttpPort,
+                TimeSpan.FromSeconds(15),
+                ct);
 
-        if (!ready)
-        {
-            lock (_stateLock) _state = ServiceState.Crashed;
-            throw new TimeoutException($"Apache did not bind to port {_config.HttpPort} within 15 seconds.");
+            if (!ready)
+            {
+                lock (_stateLock) _state = ServiceState.Crashed;
+                throw new TimeoutException($"Apache did not bind to port {_config.HttpPort} within 15 seconds.");
+            }
+
+            lock (_stateLock) _state = ServiceState.Running;
+            _logger.LogInformation("Apache running (PID={Pid}, port={Port})",
+                _process.Id, _config.HttpPort);
+
+            StartLogFileWatchers();
         }
-
-        lock (_stateLock) _state = ServiceState.Running;
-        _logger.LogInformation("Apache running (PID={Pid}, port={Port})",
-            _process.Id, _config.HttpPort);
-
-        StartLogFileWatchers();
+        catch
+        {
+            lock (_stateLock)
+            {
+                if (_state != ServiceState.Crashed)
+                    _state = ServiceState.Stopped;
+            }
+            throw;
+        }
     }
 
     // ── IServiceModule: StopAsync ────────────────────────────────────────────

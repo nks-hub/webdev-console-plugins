@@ -1,13 +1,15 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NKS.WebDevConsole.Core.Interfaces;
+using NKS.WebDevConsole.Core.Models;
+using NKS.WebDevConsole.Plugin.SDK;
 
 namespace NKS.WebDevConsole.Plugin.Redis;
 
 /// <summary>
 /// IWdcPlugin entry point — registered via AssemblyLoadContext by the daemon's PluginLoader.
 /// </summary>
-public sealed class RedisPlugin : IWdcPlugin
+public sealed class RedisPlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.redis";
     public string DisplayName => "Redis";
@@ -35,4 +37,14 @@ public sealed class RedisPlugin : IWdcPlugin
         if (_module is not null)
             await _module.StopAsync(ct);
     }
+
+    public PluginUiDefinition GetUiDefinition() =>
+        new UiSchemaBuilder(Id)
+            .Category("Caches")
+            .Icon("el-icon-coin")
+            .AddServiceCard("redis")
+            .AddConfigEditor("redis")
+            .AddLogViewer("redis")
+            .AddMetricsChart("redis")
+            .Build();
 }

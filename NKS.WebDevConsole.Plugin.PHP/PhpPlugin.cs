@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 
 using NKS.WebDevConsole.Core.Interfaces;
 using NKS.WebDevConsole.Core.Models;
+using NKS.WebDevConsole.Plugin.SDK;
 
 namespace NKS.WebDevConsole.Plugin.PHP;
 
@@ -12,7 +13,7 @@ namespace NKS.WebDevConsole.Plugin.PHP;
 /// — never MAMP/XAMPP/WAMP/system installs — and exposes a REST-friendly list of
 /// detected versions via <see cref="GetInstalledVersions"/>.
 /// </summary>
-public sealed class PhpPlugin : IWdcPlugin
+public sealed class PhpPlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.php";
     public string DisplayName => "PHP (Multi-version)";
@@ -106,6 +107,16 @@ public sealed class PhpPlugin : IWdcPlugin
     {
         _versionManager?.SetActiveVersion(majorMinor);
     }
+
+    public PluginUiDefinition GetUiDefinition() =>
+        new UiSchemaBuilder(Id)
+            .Category("Runtimes")
+            .Icon("el-icon-cpu")
+            .AddServiceCard("php")
+            .AddVersionSwitcher("php")
+            .AddConfigEditor("php")
+            .AddLogViewer("php")
+            .Build();
 
     /// <summary>Returns extensions for a specific PHP version (major.minor).</summary>
     public async Task<IReadOnlyList<PhpExtension>> GetExtensionsForVersion(string version)

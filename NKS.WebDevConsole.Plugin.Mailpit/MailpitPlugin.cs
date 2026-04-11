@@ -1,13 +1,15 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NKS.WebDevConsole.Core.Interfaces;
+using NKS.WebDevConsole.Core.Models;
+using NKS.WebDevConsole.Plugin.SDK;
 
 namespace NKS.WebDevConsole.Plugin.Mailpit;
 
 /// <summary>
 /// IWdcPlugin entry point — registered via AssemblyLoadContext by the daemon's PluginLoader.
 /// </summary>
-public sealed class MailpitPlugin : IWdcPlugin
+public sealed class MailpitPlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.mailpit";
     public string DisplayName => "Mailpit";
@@ -35,4 +37,13 @@ public sealed class MailpitPlugin : IWdcPlugin
         if (_module is not null)
             await _module.StopAsync(ct);
     }
+
+    public PluginUiDefinition GetUiDefinition() =>
+        new UiSchemaBuilder(Id)
+            .Category("Mail")
+            .Icon("el-icon-message")
+            .AddServiceCard("mailpit")
+            .AddLogViewer("mailpit")
+            .AddMetricsChart("mailpit")
+            .Build();
 }

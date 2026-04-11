@@ -146,43 +146,58 @@ public sealed class CaddyModule : IServiceModule, IAsyncDisposable
             _state = ServiceState.Starting;
         }
 
-        if (string.IsNullOrEmpty(_config.ExecutablePath))
-            throw new InvalidOperationException("caddy executable not found.");
-
-        var validation = await ValidateConfigAsync(ct);
-        if (!validation.IsValid)
+        // CRITICAL: Every early-throw path below MUST reset state. Otherwise the
+        // module stays stuck in Starting forever — observable in Dashboard as a
+        // service with state=1, pid=null, uptime=00:00:00 that can never be
+        // toggled off. Wrap the whole body so ANY exception resets state.
+        try
         {
-            lock (_stateLock) _state = ServiceState.Stopped;
-            throw new InvalidOperationException($"Config validation failed: {validation.ErrorMessage}");
+            if (string.IsNullOrEmpty(_config.ExecutablePath))
+                throw new InvalidOperationException("caddy executable not found.");
+
+            var validation = await ValidateConfigAsync(ct);
+            if (!validation.IsValid)
+                throw new InvalidOperationException($"Config validation failed: {validation.ErrorMessage}");
+
+            _logger.LogInformation("Starting Caddy (HTTP:{HttpPort}, Admin:{AdminPort})...",
+                _config.HttpPort, _config.AdminPort);
+
+            var psi = BuildStartInfo();
+            _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
+            _process.OutputDataReceived += (_, e) => { if (e.Data is not null) PublishLog(e.Data); };
+            _process.ErrorDataReceived += (_, e) => { if (e.Data is not null) PublishLog($"[ERR] {e.Data}"); };
+            _process.Exited += OnProcessExited;
+
+            _process.Start();
+            NKS.WebDevConsole.Core.Services.DaemonJobObject.AssignProcess(_process);
+            _process.BeginOutputReadLine();
+            _process.BeginErrorReadLine();
+            _startTime = DateTime.UtcNow;
+
+            _logger.LogInformation("Caddy PID {Pid} launched, waiting for admin API on port {Port}...",
+                _process.Id, _config.AdminPort);
+
+            var ready = await WaitForHttpAsync(_config.AdminPort, "/config/", TimeSpan.FromSeconds(10), ct);
+            if (!ready)
+            {
+                lock (_stateLock) _state = ServiceState.Crashed;
+                throw new TimeoutException($"Caddy admin API did not start on port {_config.AdminPort} within 10 seconds.");
+            }
+
+            lock (_stateLock) _state = ServiceState.Running;
+            _logger.LogInformation("Caddy running (PID={Pid})", _process.Id);
         }
-
-        _logger.LogInformation("Starting Caddy (HTTP:{HttpPort}, Admin:{AdminPort})...",
-            _config.HttpPort, _config.AdminPort);
-
-        var psi = BuildStartInfo();
-        _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
-        _process.OutputDataReceived += (_, e) => { if (e.Data is not null) PublishLog(e.Data); };
-        _process.ErrorDataReceived += (_, e) => { if (e.Data is not null) PublishLog($"[ERR] {e.Data}"); };
-        _process.Exited += OnProcessExited;
-
-        _process.Start();
-        NKS.WebDevConsole.Core.Services.DaemonJobObject.AssignProcess(_process);
-        _process.BeginOutputReadLine();
-        _process.BeginErrorReadLine();
-        _startTime = DateTime.UtcNow;
-
-        _logger.LogInformation("Caddy PID {Pid} launched, waiting for admin API on port {Port}...",
-            _process.Id, _config.AdminPort);
-
-        var ready = await WaitForHttpAsync(_config.AdminPort, "/config/", TimeSpan.FromSeconds(10), ct);
-        if (!ready)
+        catch
         {
-            lock (_stateLock) _state = ServiceState.Crashed;
-            throw new TimeoutException($"Caddy admin API did not start on port {_config.AdminPort} within 10 seconds.");
+            lock (_stateLock)
+            {
+                // Preserve Crashed (set by the admin-API-timeout branch above) but
+                // otherwise collapse to Stopped so the Dashboard toggle works again.
+                if (_state != ServiceState.Crashed)
+                    _state = ServiceState.Stopped;
+            }
+            throw;
         }
-
-        lock (_stateLock) _state = ServiceState.Running;
-        _logger.LogInformation("Caddy running (PID={Pid})", _process.Id);
     }
 
     public async Task StopAsync(CancellationToken ct)

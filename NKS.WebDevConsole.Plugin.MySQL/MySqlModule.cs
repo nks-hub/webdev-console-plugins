@@ -233,59 +233,74 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
             _state = ServiceState.Starting;
         }
 
-        if (string.IsNullOrEmpty(_config.ExecutablePath))
-            throw new InvalidOperationException("MySQL executable not found.");
-
-        var validation = await ValidateConfigAsync(ct);
-        if (!validation.IsValid)
-            throw new InvalidOperationException($"Config validation failed: {validation.ErrorMessage}");
-
-        _logger.LogInformation("Starting MySQL on port {Port}...", _config.Port);
-
-        // Terminate any orphaned mysqld.exe processes from a previous daemon
-        // run that would hold port 3306 and starve the fresh spawn. Only our
-        // managed binary is in scope — system/MAMP mysqlds are untouched.
-        KillOrphanedProcesses();
-
-        var psi = BuildStartInfo();
-        _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
-
-        _process.OutputDataReceived += (_, e) =>
+        // Envelope: ensure _state always leaves Starting on any exception so
+        // the Dashboard toggle remains clickable — same bug-class fix as
+        // CaddyModule/ApacheModule in this commit.
+        try
         {
-            if (e.Data is not null)
-                PublishLog(e.Data);
-        };
-        _process.ErrorDataReceived += (_, e) =>
-        {
-            if (e.Data is not null)
-                PublishLog($"[ERR] {e.Data}");
-        };
-        _process.Exited += OnProcessExited;
+            if (string.IsNullOrEmpty(_config.ExecutablePath))
+                throw new InvalidOperationException("MySQL executable not found.");
 
-        _process.Start();
-        NKS.WebDevConsole.Core.Services.DaemonJobObject.AssignProcess(_process);
-        _process.BeginOutputReadLine();
-        _process.BeginErrorReadLine();
+            var validation = await ValidateConfigAsync(ct);
+            if (!validation.IsValid)
+                throw new InvalidOperationException($"Config validation failed: {validation.ErrorMessage}");
 
-        _startTime = DateTime.UtcNow;
-        _logger.LogInformation("MySQL PID {Pid} launched, waiting for port {Port}...",
-            _process.Id, _config.Port);
+            _logger.LogInformation("Starting MySQL on port {Port}...", _config.Port);
 
-        var ready = await WaitForPortAsync(_config.Port, TimeSpan.FromSeconds(30), ct);
-        if (!ready)
-        {
-            lock (_stateLock) _state = ServiceState.Crashed;
-            throw new TimeoutException($"MySQL did not bind to port {_config.Port} within 30 seconds.");
+            // Terminate any orphaned mysqld.exe processes from a previous daemon
+            // run that would hold port 3306 and starve the fresh spawn. Only our
+            // managed binary is in scope — system/MAMP mysqlds are untouched.
+            KillOrphanedProcesses();
+
+            var psi = BuildStartInfo();
+            _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
+
+            _process.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data is not null)
+                    PublishLog(e.Data);
+            };
+            _process.ErrorDataReceived += (_, e) =>
+            {
+                if (e.Data is not null)
+                    PublishLog($"[ERR] {e.Data}");
+            };
+            _process.Exited += OnProcessExited;
+
+            _process.Start();
+            NKS.WebDevConsole.Core.Services.DaemonJobObject.AssignProcess(_process);
+            _process.BeginOutputReadLine();
+            _process.BeginErrorReadLine();
+
+            _startTime = DateTime.UtcNow;
+            _logger.LogInformation("MySQL PID {Pid} launched, waiting for port {Port}...",
+                _process.Id, _config.Port);
+
+            var ready = await WaitForPortAsync(_config.Port, TimeSpan.FromSeconds(30), ct);
+            if (!ready)
+            {
+                lock (_stateLock) _state = ServiceState.Crashed;
+                throw new TimeoutException($"MySQL did not bind to port {_config.Port} within 30 seconds.");
+            }
+
+            lock (_stateLock) _state = ServiceState.Running;
+            _logger.LogInformation("MySQL running (PID={Pid}, port={Port})", _process.Id, _config.Port);
+
+            // First-run hook: if --initialize-insecure just ran, root is still passwordless.
+            // Apply the DPAPI-stored password immediately so subsequent connections need it.
+            await SetRootPasswordIfNeededAsync(ct);
+
+            StartLogFileWatcher();
         }
-
-        lock (_stateLock) _state = ServiceState.Running;
-        _logger.LogInformation("MySQL running (PID={Pid}, port={Port})", _process.Id, _config.Port);
-
-        // First-run hook: if --initialize-insecure just ran, root is still passwordless.
-        // Apply the DPAPI-stored password immediately so subsequent connections need it.
-        await SetRootPasswordIfNeededAsync(ct);
-
-        StartLogFileWatcher();
+        catch
+        {
+            lock (_stateLock)
+            {
+                if (_state != ServiceState.Crashed)
+                    _state = ServiceState.Stopped;
+            }
+            throw;
+        }
     }
 
     // -- IServiceModule: StopAsync --

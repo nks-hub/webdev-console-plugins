@@ -111,57 +111,70 @@ public sealed class MailpitModule : IServiceModule, IAsyncDisposable
             _state = ServiceState.Starting;
         }
 
-        if (string.IsNullOrEmpty(_config.ExecutablePath))
-            throw new InvalidOperationException("mailpit executable not found.");
-
-        var validation = await ValidateConfigAsync(ct);
-        if (!validation.IsValid)
-            throw new InvalidOperationException($"Config validation failed: {validation.ErrorMessage}");
-
-        _logger.LogInformation("Starting Mailpit (SMTP:{SmtpPort}, Web:{WebPort})...",
-            _config.SmtpPort, _config.WebPort);
-
-        // Kill any orphaned mailpit.exe processes left over from a previous
-        // daemon run — they would hold our ports (8025/1025) and cause the
-        // freshly-spawned mailpit to exit with code 1 the moment it tries to
-        // bind. Only touch processes whose executable path matches ours,
-        // never random mailpits installed elsewhere on the host.
-        KillOrphanedProcesses();
-
-        var psi = BuildStartInfo();
-        _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
-
-        _process.OutputDataReceived += (_, e) =>
+        // Envelope: early throws must reset _state so Dashboard toggle stays live.
+        try
         {
-            if (e.Data is not null)
-                PublishLog(e.Data);
-        };
-        _process.ErrorDataReceived += (_, e) =>
-        {
-            if (e.Data is not null)
-                PublishLog($"[ERR] {e.Data}");
-        };
-        _process.Exited += OnProcessExited;
+            if (string.IsNullOrEmpty(_config.ExecutablePath))
+                throw new InvalidOperationException("mailpit executable not found.");
 
-        _process.Start();
-        NKS.WebDevConsole.Core.Services.DaemonJobObject.AssignProcess(_process);
-        _process.BeginOutputReadLine();
-        _process.BeginErrorReadLine();
+            var validation = await ValidateConfigAsync(ct);
+            if (!validation.IsValid)
+                throw new InvalidOperationException($"Config validation failed: {validation.ErrorMessage}");
 
-        _startTime = DateTime.UtcNow;
-        _logger.LogInformation("Mailpit PID {Pid} launched, waiting for Web UI on port {Port}...",
-            _process.Id, _config.WebPort);
+            _logger.LogInformation("Starting Mailpit (SMTP:{SmtpPort}, Web:{WebPort})...",
+                _config.SmtpPort, _config.WebPort);
 
-        var ready = await WaitForHttpAsync(_config.WebPort, TimeSpan.FromSeconds(15), ct);
-        if (!ready)
-        {
-            lock (_stateLock) _state = ServiceState.Crashed;
-            throw new TimeoutException($"Mailpit Web UI did not start on port {_config.WebPort} within 15 seconds.");
+            // Kill any orphaned mailpit.exe processes left over from a previous
+            // daemon run — they would hold our ports (8025/1025) and cause the
+            // freshly-spawned mailpit to exit with code 1 the moment it tries to
+            // bind. Only touch processes whose executable path matches ours,
+            // never random mailpits installed elsewhere on the host.
+            KillOrphanedProcesses();
+
+            var psi = BuildStartInfo();
+            _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
+
+            _process.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data is not null)
+                    PublishLog(e.Data);
+            };
+            _process.ErrorDataReceived += (_, e) =>
+            {
+                if (e.Data is not null)
+                    PublishLog($"[ERR] {e.Data}");
+            };
+            _process.Exited += OnProcessExited;
+
+            _process.Start();
+            NKS.WebDevConsole.Core.Services.DaemonJobObject.AssignProcess(_process);
+            _process.BeginOutputReadLine();
+            _process.BeginErrorReadLine();
+
+            _startTime = DateTime.UtcNow;
+            _logger.LogInformation("Mailpit PID {Pid} launched, waiting for Web UI on port {Port}...",
+                _process.Id, _config.WebPort);
+
+            var ready = await WaitForHttpAsync(_config.WebPort, TimeSpan.FromSeconds(15), ct);
+            if (!ready)
+            {
+                lock (_stateLock) _state = ServiceState.Crashed;
+                throw new TimeoutException($"Mailpit Web UI did not start on port {_config.WebPort} within 15 seconds.");
+            }
+
+            lock (_stateLock) _state = ServiceState.Running;
+            _logger.LogInformation("Mailpit running (PID={Pid}, SMTP={SmtpPort}, Web={WebPort})",
+                _process.Id, _config.SmtpPort, _config.WebPort);
         }
-
-        lock (_stateLock) _state = ServiceState.Running;
-        _logger.LogInformation("Mailpit running (PID={Pid}, SMTP={SmtpPort}, Web={WebPort})",
-            _process.Id, _config.SmtpPort, _config.WebPort);
+        catch
+        {
+            lock (_stateLock)
+            {
+                if (_state != ServiceState.Crashed)
+                    _state = ServiceState.Stopped;
+            }
+            throw;
+        }
     }
 
     // -- IServiceModule: StopAsync --
