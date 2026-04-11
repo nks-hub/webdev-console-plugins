@@ -53,6 +53,29 @@ public sealed class CloudflareConfig
     [JsonPropertyName("startupTimeoutSecs")]
     public int StartupTimeoutSecs { get; set; } = 20;
 
+    /// <summary>
+    /// Template used to pre-fill a site's public subdomain when the user
+    /// enables the tunnel in SiteEdit. Placeholders:
+    /// <c>{stem}</c> — local domain with <c>.loc</c>/<c>.local</c>/<c>.test</c>
+    /// stripped (e.g. <c>myapp.loc</c> → <c>myapp</c>),
+    /// <c>{hash}</c> — 6 deterministic hex chars from <c>md5(domain + InstallSalt)</c>,
+    /// stable per-install so the same site always gets the same URL,
+    /// <c>{user}</c> — lowercased OS username.
+    /// Default <c>{stem}-{hash}</c> gives collision-free URLs like
+    /// <c>myapp-bffa44</c> that don't leak predictable hostnames.
+    /// The user can always edit the generated value in the Cloudflare tab.
+    /// </summary>
+    [JsonPropertyName("subdomainTemplate")]
+    public string SubdomainTemplate { get; set; } = "{stem}-{hash}";
+
+    /// <summary>
+    /// Random per-install salt mixed into <c>{hash}</c> so that two
+    /// developers exposing the same domain get different public
+    /// subdomains. Auto-generated on first load when empty.
+    /// </summary>
+    [JsonPropertyName("installSalt")]
+    public string InstallSalt { get; set; } = "";
+
     // ── Persistence ─────────────────────────────────────────────────────
 
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
@@ -62,18 +85,68 @@ public sealed class CloudflareConfig
 
     public static CloudflareConfig LoadOrDefault()
     {
+        CloudflareConfig cfg;
         try
         {
             Directory.CreateDirectory(WdcPaths.CloudflareRoot);
             if (File.Exists(ConfigFilePath))
             {
                 var json = File.ReadAllText(ConfigFilePath);
-                var cfg = JsonSerializer.Deserialize<CloudflareConfig>(json);
-                if (cfg is not null) return cfg;
+                cfg = JsonSerializer.Deserialize<CloudflareConfig>(json) ?? new CloudflareConfig();
+            }
+            else
+            {
+                cfg = new CloudflareConfig();
             }
         }
-        catch { /* fall through to default */ }
-        return new CloudflareConfig();
+        catch
+        {
+            cfg = new CloudflareConfig();
+        }
+
+        // First-run salt generation — 16 hex chars is enough entropy to
+        // keep the 6-char derived hash collision-resistant across a dev's
+        // handful of exposed sites while staying short in config.json.
+        if (string.IsNullOrEmpty(cfg.InstallSalt))
+        {
+            cfg.InstallSalt = Convert.ToHexString(
+                System.Security.Cryptography.RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
+            try { cfg.Save(); } catch { /* best effort */ }
+        }
+        return cfg;
+    }
+
+    /// <summary>
+    /// Returns 6 hex chars of <c>md5(domain + InstallSalt)</c>. Deterministic
+    /// for a given (salt, domain) pair so the generated subdomain is stable
+    /// across re-enables.
+    /// </summary>
+    public string DomainHash(string domain)
+    {
+        if (string.IsNullOrEmpty(InstallSalt)) return "";
+        var bytes = System.Security.Cryptography.MD5.HashData(
+            System.Text.Encoding.UTF8.GetBytes(domain + InstallSalt));
+        return Convert.ToHexString(bytes).ToLowerInvariant()[..6];
+    }
+
+    /// <summary>
+    /// Resolves the subdomain template for a given site domain, substituting
+    /// <c>{stem}</c>, <c>{hash}</c>, and <c>{user}</c> placeholders and
+    /// collapsing stray separator dashes from empty substitutions.
+    /// </summary>
+    public string RenderSubdomain(string domain)
+    {
+        var stem = System.Text.RegularExpressions.Regex.Replace(
+            domain, @"\.(loc|local|test)$", "",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var user = Environment.UserName.ToLowerInvariant();
+        var hash = DomainHash(domain);
+        var result = (SubdomainTemplate ?? "{stem}-{hash}")
+            .Replace("{stem}", stem)
+            .Replace("{hash}", hash)
+            .Replace("{user}", user);
+        return System.Text.RegularExpressions.Regex.Replace(result, "-+", "-")
+            .Trim('-');
     }
 
     public void Save()
@@ -106,6 +179,7 @@ public sealed class CloudflareConfig
         AccountId = AccountId,
         DefaultZoneId = DefaultZoneId,
         StartupTimeoutSecs = StartupTimeoutSecs,
+        SubdomainTemplate = SubdomainTemplate,
         ApiToken = string.IsNullOrEmpty(ApiToken) ? null : "••••••••" + ApiToken[^4..],
         TunnelToken = string.IsNullOrEmpty(TunnelToken) ? null : "••••••••",
     };
