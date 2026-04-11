@@ -272,6 +272,33 @@ public sealed class CloudflareApi
         return await ReadJsonAsync(res, ct);
     }
 
+    /// <summary>
+    /// Deletes any CNAME record whose name matches <paramref name="fullName"/>.
+    /// No-op when the record does not exist. Used when a site is
+    /// deactivated in SiteEdit so the public hostname stops resolving.
+    /// </summary>
+    public async Task DeleteCnameByNameAsync(string zoneId, string fullName, CancellationToken ct = default)
+    {
+        using var searchReq = BuildRequest(HttpMethod.Get,
+            $"zones/{zoneId}/dns_records?type=CNAME&name={Uri.EscapeDataString(fullName)}");
+        using var searchRes = await _http.SendAsync(searchReq, ct);
+        var json = await ReadJsonAsync(searchRes, ct);
+        if (!json.TryGetProperty("result", out var arr) ||
+            arr.ValueKind != JsonValueKind.Array ||
+            arr.GetArrayLength() == 0)
+        {
+            return; // nothing to delete
+        }
+        foreach (var el in arr.EnumerateArray())
+        {
+            var id = el.GetProperty("id").GetString();
+            if (string.IsNullOrEmpty(id)) continue;
+            using var delReq = BuildRequest(HttpMethod.Delete, $"zones/{zoneId}/dns_records/{id}");
+            using var delRes = await _http.SendAsync(delReq, ct);
+            await ReadJsonAsync(delRes, ct);
+        }
+    }
+
     // ── Tunnels ─────────────────────────────────────────────────────────
 
     /// <summary>List all tunnels for the configured account.</summary>
