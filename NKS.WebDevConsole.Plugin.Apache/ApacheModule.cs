@@ -18,8 +18,15 @@ public sealed class ApacheConfig
     public string ExecutablePath { get; set; } = "httpd";
     public string ServerRoot { get; set; } = string.Empty;
     public string ConfigFile { get; set; } = "conf/httpd.conf";
-    public string VhostsDirectory { get; set; } = "conf/sites-enabled";
-    public string LogDirectory { get; set; } = "logs";
+
+    // Defaults must be ABSOLUTE so that vhost/log writes land in ~/.wdc even
+    // when Apache is not installed yet (InitializeAsync hasn't run, or no
+    // version dir was found). Otherwise Directory.CreateDirectory + File.Write
+    // resolve relative to the daemon's cwd and leak files into whatever
+    // directory the user invoked `dotnet run` from. Picked up by e2e tests
+    // when the repo src dir was the cwd.
+    public string VhostsDirectory { get; set; } = Path.Combine(WdcPaths.GeneratedRoot, "apache", "sites-enabled");
+    public string LogDirectory { get; set; } = Path.Combine(WdcPaths.LogsRoot, "apache");
     public int HttpPort { get; set; } = 80;
     public int HttpsPort { get; set; } = 443;
     public int GracefulTimeoutSecs { get; set; } = 30;
@@ -153,6 +160,10 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
     {
         if (string.IsNullOrEmpty(_config.VhostsDirectory))
             throw new InvalidOperationException("Apache module is not initialized (VhostsDirectory is empty).");
+        if (!Path.IsPathRooted(_config.VhostsDirectory))
+            throw new InvalidOperationException(
+                $"ApacheConfig.VhostsDirectory must be an absolute path but was '{_config.VhostsDirectory}'. " +
+                "Relative paths would resolve against the daemon cwd and leak files outside ~/.wdc.");
 
         Directory.CreateDirectory(_config.VhostsDirectory);
 
