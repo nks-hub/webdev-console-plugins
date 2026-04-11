@@ -578,40 +578,84 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
     }
 
     /// <summary>
-    /// Finds and terminates any orphaned mysqld.exe processes pointing at
-    /// the same managed binary we're about to spawn. Prevents port 3306
-    /// conflicts caused by a previous daemon run that exited without stopping
-    /// its children. Processes from other mysqld installs (system/MAMP) are
-    /// left untouched.
+    /// Finds and terminates any orphaned mysqld.exe processes that would hold
+    /// our target port. Uses two strategies: (1) MainModule path match, (2)
+    /// Get-NetTCPConnection port-holder match verified against process name.
+    /// System/MAMP mysqlds on a different port are untouched.
     /// </summary>
     private void KillOrphanedProcesses()
     {
         if (string.IsNullOrEmpty(_config.ExecutablePath)) return;
-        Process[] existing;
-        try { existing = Process.GetProcessesByName("mysqld"); }
-        catch { return; }
 
-        foreach (var proc in existing)
+        // Strategy 1: executable-path match.
+        try
         {
-            try
+            foreach (var proc in Process.GetProcessesByName("mysqld"))
             {
-                var exePath = proc.MainModule?.FileName;
-                if (exePath is not null && string.Equals(exePath, _config.ExecutablePath, StringComparison.OrdinalIgnoreCase))
+                try
                 {
-                    _logger.LogWarning("Killing orphaned mysqld.exe PID {Pid} from previous run", proc.Id);
-                    proc.Kill(entireProcessTree: true);
-                    proc.WaitForExit(3000);
+                    var exePath = proc.MainModule?.FileName;
+                    if (exePath is not null && string.Equals(exePath, _config.ExecutablePath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogWarning("Killing orphaned mysqld.exe PID {Pid} (path-match) from previous run", proc.Id);
+                        proc.Kill(entireProcessTree: true);
+                        proc.WaitForExit(3000);
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Orphan kill skipped for PID {Pid}", proc.Id);
-            }
-            finally
-            {
-                proc.Dispose();
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "path-match orphan kill skipped for PID {Pid}", proc.Id);
+                }
+                finally { proc.Dispose(); }
             }
         }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Process enumeration for mysqld failed");
+        }
+
+        // Strategy 2: port-holder match.
+        var pid = FindPidHoldingTcpPort(_config.Port);
+        if (pid <= 0) return;
+        try
+        {
+            using var proc = Process.GetProcessById(pid);
+            if (!proc.ProcessName.Equals("mysqld", StringComparison.OrdinalIgnoreCase)) return;
+            _logger.LogWarning("Killing orphan PID {Pid} holding port {Port} (name-match {Name})",
+                pid, _config.Port, proc.ProcessName);
+            proc.Kill(entireProcessTree: true);
+            proc.WaitForExit(3000);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "port-holder orphan kill skipped for PID {Pid}", pid);
+        }
+    }
+
+    /// <summary>
+    /// Returns the PID of the process listening on the given TCP port via
+    /// Get-NetTCPConnection, or -1 on failure. Ships with Win10+.
+    /// </summary>
+    private static int FindPidHoldingTcpPort(int port)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = $"-NoProfile -Command \"Get-NetTCPConnection -LocalPort {port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess\"",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            using var p = Process.Start(psi);
+            if (p is null) return -1;
+            var output = p.StandardOutput.ReadToEnd().Trim();
+            p.WaitForExit(2000);
+            return int.TryParse(output, out var pid) ? pid : -1;
+        }
+        catch { return -1; }
     }
 
     /// <summary>

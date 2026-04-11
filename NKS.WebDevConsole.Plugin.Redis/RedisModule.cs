@@ -144,6 +144,11 @@ public sealed class RedisModule : IServiceModule, IAsyncDisposable
 
         _logger.LogInformation("Starting Redis on port {Port}...", _config.Port);
 
+        // Terminate orphaned redis-server.exe processes from a prior daemon
+        // run so they don't steal port 6379 from the fresh spawn. Only our
+        // managed binary is affected — system Redis installs are untouched.
+        KillOrphanedProcesses();
+
         var psi = BuildStartInfo();
         _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
 
@@ -312,6 +317,93 @@ public sealed class RedisModule : IServiceModule, IAsyncDisposable
     private void PublishLog(string line)
     {
         _logChannel.Writer.TryWrite(line);
+    }
+
+    /// <summary>
+    /// Finds and terminates any orphaned redis-server.exe processes that
+    /// would hold port <see cref="_config.Port"/> and starve our fresh spawn.
+    /// Uses two strategies, whichever finds something:
+    ///   1. Match by executable path via <c>Process.MainModule</c>.
+    ///   2. Match by TCP listener on the target port via PowerShell
+    ///      <c>Get-NetTCPConnection</c>, verified against <c>redis-server</c>
+    ///      process name. This catches orphans that MainModule couldn't read
+    ///      due to cross-user / permission quirks on Windows.
+    /// System-installed Redis on a different port is untouched.
+    /// </summary>
+    private void KillOrphanedProcesses()
+    {
+        if (string.IsNullOrEmpty(_config.ExecutablePath)) return;
+
+        // Strategy 1: executable-path match (fast, no shell).
+        try
+        {
+            foreach (var proc in Process.GetProcessesByName("redis-server"))
+            {
+                try
+                {
+                    var exePath = proc.MainModule?.FileName;
+                    if (exePath is not null && string.Equals(exePath, _config.ExecutablePath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogWarning("Killing orphaned redis-server.exe PID {Pid} (path-match) from previous run", proc.Id);
+                        proc.Kill(entireProcessTree: true);
+                        proc.WaitForExit(2000);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "path-match orphan kill skipped for PID {Pid}", proc.Id);
+                }
+                finally { proc.Dispose(); }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Process enumeration for redis-server failed");
+        }
+
+        // Strategy 2: port-holder match via PowerShell.
+        var pid = FindPidHoldingTcpPort(_config.Port);
+        if (pid <= 0) return;
+        try
+        {
+            using var proc = Process.GetProcessById(pid);
+            if (!proc.ProcessName.Equals("redis-server", StringComparison.OrdinalIgnoreCase)) return;
+            _logger.LogWarning("Killing orphan PID {Pid} holding port {Port} (name-match {Name})",
+                pid, _config.Port, proc.ProcessName);
+            proc.Kill(entireProcessTree: true);
+            proc.WaitForExit(2000);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "port-holder orphan kill skipped for PID {Pid}", pid);
+        }
+    }
+
+    /// <summary>
+    /// Returns the PID of the process currently listening on the given TCP port,
+    /// or -1 if none found / PowerShell unavailable. Uses Get-NetTCPConnection
+    /// which ships with every Windows 10+ system.
+    /// </summary>
+    private static int FindPidHoldingTcpPort(int port)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = $"-NoProfile -Command \"Get-NetTCPConnection -LocalPort {port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess\"",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            using var p = Process.Start(psi);
+            if (p is null) return -1;
+            var output = p.StandardOutput.ReadToEnd().Trim();
+            p.WaitForExit(2000);
+            return int.TryParse(output, out var pid) ? pid : -1;
+        }
+        catch { return -1; }
     }
 
     // -- Process exit handler --

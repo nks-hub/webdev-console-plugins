@@ -279,40 +279,83 @@ public sealed class MailpitModule : IServiceModule, IAsyncDisposable
     }
 
     /// <summary>
-    /// Finds and terminates any orphaned mailpit.exe processes pointing at
-    /// the same managed binary we're about to spawn. Runs before StartAsync
-    /// to avoid "address already in use" failures caused by a previous daemon
-    /// run that exited without stopping its children. Processes belonging to
-    /// other mailpit installs are left alone.
+    /// Finds and terminates orphaned mailpit.exe processes that would hold
+    /// our SMTP / Web ports. Uses (1) MainModule path match and (2)
+    /// Get-NetTCPConnection port-holder match verified by process name.
     /// </summary>
     private void KillOrphanedProcesses()
     {
         if (string.IsNullOrEmpty(_config.ExecutablePath)) return;
-        Process[] existing;
-        try { existing = Process.GetProcessesByName("mailpit"); }
-        catch { return; }
 
-        foreach (var proc in existing)
+        // Strategy 1: executable-path match.
+        try
         {
+            foreach (var proc in Process.GetProcessesByName("mailpit"))
+            {
+                try
+                {
+                    var exePath = proc.MainModule?.FileName;
+                    if (exePath is not null && string.Equals(exePath, _config.ExecutablePath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogWarning("Killing orphaned mailpit.exe PID {Pid} (path-match) from previous run", proc.Id);
+                        proc.Kill(entireProcessTree: true);
+                        proc.WaitForExit(2000);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "path-match orphan kill skipped for PID {Pid}", proc.Id);
+                }
+                finally { proc.Dispose(); }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Process enumeration for mailpit failed");
+        }
+
+        // Strategy 2: port-holder match for SMTP and Web ports.
+        foreach (var port in new[] { _config.SmtpPort, _config.WebPort })
+        {
+            var pid = FindPidHoldingTcpPort(port);
+            if (pid <= 0) continue;
             try
             {
-                var exePath = proc.MainModule?.FileName;
-                if (exePath is not null && string.Equals(exePath, _config.ExecutablePath, StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogWarning("Killing orphaned mailpit.exe PID {Pid} from previous run", proc.Id);
-                    proc.Kill(entireProcessTree: true);
-                    proc.WaitForExit(2000);
-                }
+                using var proc = Process.GetProcessById(pid);
+                if (!proc.ProcessName.Equals("mailpit", StringComparison.OrdinalIgnoreCase)) continue;
+                _logger.LogWarning("Killing orphan PID {Pid} holding port {Port} (name-match {Name})",
+                    pid, port, proc.ProcessName);
+                proc.Kill(entireProcessTree: true);
+                proc.WaitForExit(2000);
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Orphan kill skipped for PID {Pid}", proc.Id);
-            }
-            finally
-            {
-                proc.Dispose();
+                _logger.LogDebug(ex, "port-holder orphan kill skipped for PID {Pid}", pid);
             }
         }
+    }
+
+    /// <summary>Returns PID holding a TCP port via Get-NetTCPConnection, or -1.</summary>
+    private static int FindPidHoldingTcpPort(int port)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = $"-NoProfile -Command \"Get-NetTCPConnection -LocalPort {port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess\"",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            using var p = Process.Start(psi);
+            if (p is null) return -1;
+            var output = p.StandardOutput.ReadToEnd().Trim();
+            p.WaitForExit(2000);
+            return int.TryParse(output, out var pid) ? pid : -1;
+        }
+        catch { return -1; }
     }
 
     // -- Process exit handler --
