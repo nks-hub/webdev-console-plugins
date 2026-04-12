@@ -84,7 +84,7 @@ public sealed class RedisModule : IServiceModule, IAsyncDisposable
         // Pick the highest installed version
         var versionDirs = Directory.GetDirectories(redisRoot)
             .Where(d => !Path.GetFileName(d).StartsWith('.'))
-            .OrderByDescending(d => d, StringComparer.Ordinal);
+            .OrderByDescending(d => Path.GetFileName(d), SemverVersionComparer.Instance);
 
         foreach (var vdir in versionDirs)
         {

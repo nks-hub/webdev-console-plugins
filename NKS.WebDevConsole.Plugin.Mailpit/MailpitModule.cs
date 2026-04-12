@@ -77,7 +77,7 @@ public sealed class MailpitModule : IServiceModule, IAsyncDisposable
 
         var versionDirs = Directory.GetDirectories(mailpitRoot)
             .Where(d => !Path.GetFileName(d).StartsWith('.'))
-            .OrderByDescending(d => d, StringComparer.Ordinal);
+            .OrderByDescending(d => Path.GetFileName(d), SemverVersionComparer.Instance);
 
         foreach (var vdir in versionDirs)
         {

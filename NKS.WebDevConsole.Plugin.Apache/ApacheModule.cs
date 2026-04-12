@@ -97,7 +97,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
 
         var versionDirs = Directory.GetDirectories(_config.BinariesRoot)
             .Where(d => !Path.GetFileName(d).StartsWith('.'))
-            .OrderByDescending(d => d, StringComparer.Ordinal)
+            .OrderByDescending(d => Path.GetFileName(d), NKS.WebDevConsole.Core.Services.SemverVersionComparer.Instance)
             .ToList();
 
         foreach (var versionDir in versionDirs)
@@ -199,7 +199,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
                         var name = Path.GetFileName(d);
                         return name == requested || name.StartsWith(requested + ".");
                     })
-                    .OrderByDescending(d => d, StringComparer.Ordinal)
+                    .OrderByDescending(d => Path.GetFileName(d), NKS.WebDevConsole.Core.Services.SemverVersionComparer.Instance)
                     .ToList();
 
                 foreach (var c in candidates)

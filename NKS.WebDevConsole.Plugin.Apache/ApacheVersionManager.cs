@@ -66,7 +66,7 @@ public sealed class ApacheVersionManager
         {
             var versionDirs = Directory.GetDirectories(managedRoot)
                 .Where(d => !Path.GetFileName(d).StartsWith('.'))
-                .OrderByDescending(d => d, StringComparer.Ordinal);
+                .OrderByDescending(d => Path.GetFileName(d), SemverVersionComparer.Instance);
             foreach (var vdir in versionDirs)
             {
                 yield return Path.Combine(vdir, "bin", exe);

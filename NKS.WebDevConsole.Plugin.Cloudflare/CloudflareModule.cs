@@ -82,7 +82,7 @@ public sealed class CloudflareModule : IServiceModule, IAsyncDisposable
         if (Directory.Exists(wdcRoot))
         {
             var versionDirs = Directory.GetDirectories(wdcRoot)
-                .OrderByDescending(d => d, StringComparer.Ordinal);
+                .OrderByDescending(d => Path.GetFileName(d), SemverVersionComparer.Instance);
             foreach (var vdir in versionDirs)
                 candidates.Add(Path.Combine(vdir, exeName));
         }
@@ -96,7 +96,7 @@ public sealed class CloudflareModule : IServiceModule, IAsyncDisposable
             if (Directory.Exists(flyRoot))
             {
                 var versionDirs = Directory.GetDirectories(flyRoot)
-                    .OrderByDescending(d => d, StringComparer.Ordinal);
+                    .OrderByDescending(d => Path.GetFileName(d), SemverVersionComparer.Instance);
                 foreach (var vdir in versionDirs)
                     candidates.Add(Path.Combine(vdir, exeName));
             }

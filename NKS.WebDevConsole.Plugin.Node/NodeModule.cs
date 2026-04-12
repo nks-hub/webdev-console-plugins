@@ -71,7 +71,7 @@ public sealed class NodeModule : IServiceModule, IAsyncDisposable
             // lives alongside a lingering Node 9 install.
             var versionDirs = Directory.GetDirectories(nodeRoot)
                 .Where(d => !Path.GetFileName(d).StartsWith('.'))
-                .OrderByDescending(d => Path.GetFileName(d), SemverDescendingComparer.Instance);
+                .OrderByDescending(d => Path.GetFileName(d), SemverVersionComparer.Instance);
 
             foreach (var vdir in versionDirs)
             {
@@ -606,69 +606,3 @@ public record NodeSiteStatus(
     long MemoryBytes,
     TimeSpan? Uptime);
 
-/// <summary>
-/// Ascending comparer that sorts version-like strings numerically per
-/// dot-separated segment so <c>"20.5.0"</c> ranks above <c>"9.0.0"</c>.
-/// Non-numeric segments fall back to ordinal comparison, and a pre-release
-/// suffix (<c>-beta.1</c>) sorts below the stable release.
-///
-/// Used by NodeModule.DetectNodeExecutable via <c>OrderByDescending</c> to
-/// pick the highest installed version directory under
-/// <c>~/.wdc/binaries/node/</c>. The plain <c>StringComparer.Ordinal</c>
-/// previously used ranked "9.0.0" above "20.5.0" because ASCII
-/// <c>'9' &gt; '2'</c> — wrong once Node 10+ coexists with Node 9.
-/// </summary>
-internal sealed class SemverDescendingComparer : IComparer<string>
-{
-    public static readonly SemverDescendingComparer Instance = new();
-
-    // Implements ASCENDING semver order. Callers use OrderByDescending to
-    // flip the direction, matching the standard IComparer pattern. The
-    // type name is retained for backward reference but the semantics are
-    // "standard ascending semver comparer."
-    public int Compare(string? x, string? y) => CompareAscending(x, y);
-
-    internal static int CompareAscending(string? a, string? b)
-    {
-        if (a is null && b is null) return 0;
-        if (a is null) return -1;
-        if (b is null) return 1;
-
-        // Split pre-release suffix (everything after the first '-')
-        var aDash = a.IndexOf('-');
-        var bDash = b.IndexOf('-');
-        var aMain = aDash >= 0 ? a[..aDash] : a;
-        var bMain = bDash >= 0 ? b[..bDash] : b;
-        var aPre = aDash >= 0 ? a[(aDash + 1)..] : "";
-        var bPre = bDash >= 0 ? b[(bDash + 1)..] : "";
-
-        // Compare main segments numerically where possible
-        var aSegs = aMain.Split('.');
-        var bSegs = bMain.Split('.');
-        var len = Math.Max(aSegs.Length, bSegs.Length);
-        for (int i = 0; i < len; i++)
-        {
-            var aSeg = i < aSegs.Length ? aSegs[i] : "0";
-            var bSeg = i < bSegs.Length ? bSegs[i] : "0";
-            if (int.TryParse(aSeg, out var aNum) && int.TryParse(bSeg, out var bNum))
-            {
-                var cmp = aNum.CompareTo(bNum);
-                if (cmp != 0) return cmp;
-            }
-            else
-            {
-                var cmp = string.CompareOrdinal(aSeg, bSeg);
-                if (cmp != 0) return cmp;
-            }
-        }
-
-        // Per semver: a version WITHOUT a pre-release suffix ranks ABOVE
-        // one with the same main segments but a pre-release suffix.
-        //   1.0.0       > 1.0.0-rc.1
-        //   1.0.0-rc.2  > 1.0.0-rc.1
-        if (aPre.Length == 0 && bPre.Length == 0) return 0;
-        if (aPre.Length == 0) return 1;
-        if (bPre.Length == 0) return -1;
-        return string.CompareOrdinal(aPre, bPre);
-    }
-}

@@ -92,7 +92,7 @@ public sealed class CaddyModule : IServiceModule, IAsyncDisposable
         var exeName = OperatingSystem.IsWindows() ? "caddy.exe" : "caddy";
         var versionDirs = Directory.GetDirectories(caddyRoot)
             .Where(d => !Path.GetFileName(d).StartsWith('.'))
-            .OrderByDescending(d => d, StringComparer.Ordinal);
+            .OrderByDescending(d => Path.GetFileName(d), SemverVersionComparer.Instance);
 
         foreach (var vdir in versionDirs)
         {

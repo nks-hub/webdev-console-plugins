@@ -35,7 +35,7 @@ public sealed class MySqlConfig
 
         var versionDirs = Directory.GetDirectories(BinariesRoot)
             .Where(d => !Path.GetFileName(d).StartsWith('.'))
-            .OrderByDescending(d => d, StringComparer.Ordinal)
+            .OrderByDescending(d => Path.GetFileName(d), SemverVersionComparer.Instance)
             .ToList();
 
         foreach (var vdir in versionDirs)
