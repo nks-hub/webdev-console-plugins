@@ -1,6 +1,5 @@
 using CliWrap;
 using CliWrap.Buffered;
-using Microsoft.Extensions.Logging;
 
 namespace NKS.WebDevConsole.Plugin.PHP;
 
@@ -18,11 +17,8 @@ public record PhpExtension(
 /// </summary>
 public sealed class PhpExtensionManager
 {
-    private readonly ILogger<PhpExtensionManager> _logger;
-
-    public PhpExtensionManager(ILogger<PhpExtensionManager> logger)
+    public PhpExtensionManager()
     {
-        _logger = logger;
     }
 
     /// <summary>

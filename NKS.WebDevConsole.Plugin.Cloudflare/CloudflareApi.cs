@@ -1,7 +1,6 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Microsoft.Extensions.Logging;
 
 namespace NKS.WebDevConsole.Plugin.Cloudflare;
 
@@ -26,13 +25,11 @@ public sealed class CloudflareApi
     private const string BaseUrl = "https://api.cloudflare.com/client/v4/";
 
     private readonly CloudflareConfig _config;
-    private readonly ILogger<CloudflareApi> _logger;
     private readonly HttpClient _http;
 
-    public CloudflareApi(CloudflareConfig config, ILogger<CloudflareApi> logger)
+    public CloudflareApi(CloudflareConfig config)
     {
         _config = config;
-        _logger = logger;
         _http = new HttpClient { BaseAddress = new Uri(BaseUrl), Timeout = TimeSpan.FromSeconds(15) };
         _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("NKS-WebDevConsole/1.0 (+cloudflare-plugin)");
