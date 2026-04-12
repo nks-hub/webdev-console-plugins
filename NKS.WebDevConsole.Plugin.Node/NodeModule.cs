@@ -527,7 +527,7 @@ public sealed class NodeModule : IServiceModule, IAsyncDisposable
         if (string.IsNullOrEmpty(input)) return false;
         foreach (var c in input)
         {
-            if (c is '&' or '|' or ';' or '`' or '$' or '>' or '<' or '\n' or '\r')
+            if (c is '&' or '|' or ';' or '`' or '$' or '>' or '<' or '\n' or '\r' or '\t' or '\0')
                 return true;
         }
         return false;
