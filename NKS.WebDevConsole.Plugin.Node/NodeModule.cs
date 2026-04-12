@@ -1,12 +1,15 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using NKS.WebDevConsole.Core.Interfaces;
 using NKS.WebDevConsole.Core.Models;
 using NKS.WebDevConsole.Core.Services;
+
+[assembly: InternalsVisibleTo("NKS.WebDevConsole.Daemon.Tests")]
 
 namespace NKS.WebDevConsole.Plugin.Node;
 
@@ -392,7 +395,7 @@ public sealed class NodeModule : IServiceModule, IAsyncDisposable
     /// surface (e.g. "npm start &amp; del /q *"). Users who need to run a
     /// custom script should invoke it via `node script.js` or `npm run <task>`.
     /// </summary>
-    private static readonly HashSet<string> AllowedExecutables = new(StringComparer.OrdinalIgnoreCase)
+    internal static readonly HashSet<string> AllowedExecutables = new(StringComparer.OrdinalIgnoreCase)
     {
         "npm", "npx", "node", "yarn", "pnpm", "bun", "deno",
     };
@@ -515,7 +518,7 @@ public sealed class NodeModule : IServiceModule, IAsyncDisposable
     /// Called after splitting the command into exe + args so we don't block
     /// legitimate flag syntax like <c>--port=3000</c>.
     /// </summary>
-    private static bool ContainsShellMetacharacters(string input)
+    internal static bool ContainsShellMetacharacters(string input)
     {
         if (string.IsNullOrEmpty(input)) return false;
         foreach (var c in input)
