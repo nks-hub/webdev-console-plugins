@@ -271,23 +271,34 @@ public sealed class NodeModule : IServiceModule, IAsyncDisposable
         if (!_processes.TryGetValue(domain, out var siteProc))
             return;
 
-        if (siteProc.Process is null || siteProc.Process.HasExited)
+        // Claim ownership of the state transition. OnSiteProcessExited checks
+        // this flag under the same lock and bails out so it can't overwrite
+        // Stopped with Crashed once we've started stopping intentionally.
+        Process? processToStop;
+        int pid;
+        lock (siteProc.Lock)
         {
-            siteProc.State = ServiceState.Stopped;
-            siteProc.Process = null;
-            return;
+            if (siteProc.Process is null || siteProc.Process.HasExited)
+            {
+                siteProc.State = ServiceState.Stopped;
+                siteProc.Process = null;
+                return;
+            }
+            siteProc.State = ServiceState.Stopping;
+            processToStop = siteProc.Process;
+            pid = processToStop.Id;
         }
 
-        siteProc.State = ServiceState.Stopping;
-        PublishLog($"[{domain}] Stopping PID {siteProc.Process.Id}...");
+        PublishLog($"[{domain}] Stopping PID {pid}...");
 
-        var pid = siteProc.Process.Id;
-
-        // Graceful: SIGTERM on Unix, taskkill tree on Windows
+        // Graceful: SIGTERM on Unix, process-tree kill on Windows. Windows
+        // console apps don't receive a reliable graceful signal via
+        // Process.CloseMainWindow for detached processes spawned with
+        // CreateNoWindow=true, so hard-kill is the practical choice here.
+        // Node apps that need clean shutdown should rely on process.on('exit').
         if (OperatingSystem.IsWindows())
         {
-            // Kill entire process tree (npm spawns node as child)
-            try { siteProc.Process.Kill(entireProcessTree: true); }
+            try { processToStop.Kill(entireProcessTree: true); }
             catch { /* best-effort */ }
         }
         else
@@ -301,19 +312,25 @@ public sealed class NodeModule : IServiceModule, IAsyncDisposable
 
         try
         {
-            await siteProc.Process.WaitForExitAsync(cts.Token);
+            await processToStop.WaitForExitAsync(cts.Token);
         }
         catch (OperationCanceledException)
         {
             _logger.LogWarning("[{Domain}] Node did not stop in {Timeout}s — force-killing",
                 domain, GracefulTimeoutSecs);
-            if (!siteProc.Process.HasExited)
-                siteProc.Process.Kill(entireProcessTree: true);
+            if (!processToStop.HasExited)
+            {
+                try { processToStop.Kill(entireProcessTree: true); }
+                catch { /* best-effort */ }
+            }
         }
 
-        siteProc.Process.Dispose();
-        siteProc.Process = null;
-        siteProc.State = ServiceState.Stopped;
+        lock (siteProc.Lock)
+        {
+            processToStop.Dispose();
+            siteProc.Process = null;
+            siteProc.State = ServiceState.Stopped;
+        }
         PublishLog($"[{domain}] Stopped");
         _logger.LogInformation("[{Domain}] Node stopped", domain);
     }
@@ -367,6 +384,19 @@ public sealed class NodeModule : IServiceModule, IAsyncDisposable
 
     // ── Private helpers ───────────────────────────────────────────────
 
+    /// <summary>
+    /// Whitelist of node ecosystem executables allowed as the first token of
+    /// a site's start command. Anything outside this set is rejected — we
+    /// refuse to delegate to a shell because site configs round-trip through
+    /// the REST API and config sync, making the command string an injection
+    /// surface (e.g. "npm start &amp; del /q *"). Users who need to run a
+    /// custom script should invoke it via `node script.js` or `npm run <task>`.
+    /// </summary>
+    private static readonly HashSet<string> AllowedExecutables = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "npm", "npx", "node", "yarn", "pnpm", "bun", "deno",
+    };
+
     private ProcessStartInfo BuildProcessStartInfo(string command, string workingDir, int port)
     {
         // Parse command into executable + args
@@ -376,6 +406,25 @@ public sealed class NodeModule : IServiceModule, IAsyncDisposable
         var parts = command.Split(' ', 2, StringSplitOptions.TrimEntries);
         var exe = parts[0];
         var args = parts.Length > 1 ? parts[1] : "";
+
+        if (!AllowedExecutables.Contains(exe))
+        {
+            throw new InvalidOperationException(
+                $"Node start command executable '{exe}' is not in the allowlist. " +
+                $"Allowed: {string.Join(", ", AllowedExecutables)}. " +
+                "Custom scripts must be invoked via 'node script.js' or 'npm run <task>'.");
+        }
+
+        // Reject argument strings containing shell metacharacters. Even though
+        // we don't delegate to a shell, npm/yarn scripts can re-interpret
+        // these when they spawn their own children, so we block them at the
+        // perimeter rather than trusting downstream parsers.
+        if (ContainsShellMetacharacters(args))
+        {
+            throw new InvalidOperationException(
+                "Node start command arguments contain shell metacharacters (& | ; ` $ > < etc). " +
+                "Use plain arguments only.");
+        }
 
         string resolvedExe;
         if (exe.Equals("npm", StringComparison.OrdinalIgnoreCase))
@@ -394,17 +443,13 @@ public sealed class NodeModule : IServiceModule, IAsyncDisposable
         }
         else
         {
-            // Arbitrary command — run via shell
-            if (OperatingSystem.IsWindows())
-            {
-                args = $"/c {command}";
-                resolvedExe = "cmd.exe";
-            }
-            else
-            {
-                args = $"-c \"{command.Replace("\"", "\\\"")}\"";
-                resolvedExe = "/bin/sh";
-            }
+            // yarn / pnpm / bun / deno — look them up alongside node, fall back to PATH
+            var extName = OperatingSystem.IsWindows() ? $"{exe}.cmd" : exe;
+            var nodeDir = _nodeExecutable is not null ? Path.GetDirectoryName(_nodeExecutable) : null;
+            var colocated = nodeDir is not null ? Path.Combine(nodeDir, extName) : null;
+            resolvedExe = (colocated is not null && File.Exists(colocated))
+                ? colocated
+                : FindInPath(extName) ?? extName;
         }
 
         var psi = new ProcessStartInfo
@@ -437,16 +482,48 @@ public sealed class NodeModule : IServiceModule, IAsyncDisposable
     {
         if (!_processes.TryGetValue(domain, out var siteProc)) return;
 
-        var exitCode = siteProc.Process?.ExitCode ?? -1;
+        // Lock against concurrent StopSiteAsync to avoid (a) reading ExitCode
+        // on a disposed Process and (b) clobbering State transitions that
+        // StopSiteAsync is mid-way through (Stopping → Stopped).
+        lock (siteProc.Lock)
+        {
+            if (siteProc.State == ServiceState.Stopping || siteProc.State == ServiceState.Stopped)
+                return; // intentional stop — StopSiteAsync owns the transition
 
-        if (siteProc.State == ServiceState.Stopping)
-            return; // intentional stop
+            int exitCode;
+            try
+            {
+                exitCode = siteProc.Process?.HasExited == true ? siteProc.Process.ExitCode : -1;
+            }
+            catch (InvalidOperationException)
+            {
+                // Process disposed by StopSiteAsync in the gap between our
+                // entry and the lock acquire — treat as intentional stop.
+                return;
+            }
 
-        siteProc.State = ServiceState.Crashed;
-        siteProc.RestartCount++;
-        PublishLog($"[{domain}] Process exited with code {exitCode} (crash #{siteProc.RestartCount})");
-        _logger.LogWarning("[{Domain}] Node process exited with code {ExitCode} (crash #{Count})",
-            domain, exitCode, siteProc.RestartCount);
+            siteProc.State = ServiceState.Crashed;
+            siteProc.RestartCount++;
+            PublishLog($"[{domain}] Process exited with code {exitCode} (crash #{siteProc.RestartCount})");
+            _logger.LogWarning("[{Domain}] Node process exited with code {ExitCode} (crash #{Count})",
+                domain, exitCode, siteProc.RestartCount);
+        }
+    }
+
+    /// <summary>
+    /// Reject any string containing characters that shells interpret specially.
+    /// Called after splitting the command into exe + args so we don't block
+    /// legitimate flag syntax like <c>--port=3000</c>.
+    /// </summary>
+    private static bool ContainsShellMetacharacters(string input)
+    {
+        if (string.IsNullOrEmpty(input)) return false;
+        foreach (var c in input)
+        {
+            if (c is '&' or '|' or ';' or '`' or '$' or '>' or '<' or '\n' or '\r')
+                return true;
+        }
+        return false;
     }
 
     private void PublishLog(string line)
@@ -502,6 +579,13 @@ internal sealed class NodeSiteProcess
     public ServiceState State { get; set; } = ServiceState.Stopped;
     public DateTime? StartTime { get; set; }
     public int RestartCount { get; set; }
+
+    /// <summary>
+    /// Serialises state transitions between the process-exited event handler
+    /// (fires on ThreadPool) and the StopSiteAsync control flow so
+    /// ExitCode/Process accesses don't race against Dispose().
+    /// </summary>
+    public object Lock { get; } = new();
 }
 
 /// <summary>Public status DTO for a single site's Node process.</summary>
