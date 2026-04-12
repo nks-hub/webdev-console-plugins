@@ -43,7 +43,6 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
     public ServiceType Type => ServiceType.WebServer;
 
     private readonly ApacheVersionManager _versionManager;
-    private readonly ApacheConfigGenerator _configGen;
     private readonly ApacheHealthChecker _healthChecker;
     private readonly ILogger<ApacheModule> _logger;
     private readonly ApacheConfig _config;
@@ -71,13 +70,11 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
 
     public ApacheModule(
         ApacheVersionManager versionManager,
-        ApacheConfigGenerator configGen,
         ApacheHealthChecker healthChecker,
         ILogger<ApacheModule> logger,
         ApacheConfig? config = null)
     {
         _versionManager = versionManager;
-        _configGen = configGen;
         _healthChecker = healthChecker;
         _logger = logger;
         _config = config ?? new ApacheConfig();

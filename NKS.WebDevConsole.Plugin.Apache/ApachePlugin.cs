@@ -20,7 +20,6 @@ public sealed class ApachePlugin : IWdcPlugin, IFrontendPanelProvider
     public void Initialize(IServiceCollection services, IPluginContext context)
     {
         services.AddSingleton<ApacheVersionManager>();
-        services.AddSingleton<ApacheConfigGenerator>();
         services.AddSingleton<ApacheHealthChecker>();
         services.AddSingleton<ApacheModule>();
 
