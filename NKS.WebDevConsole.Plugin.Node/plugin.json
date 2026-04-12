@@ -1,0 +1,8 @@
+{
+  "id": "node",
+  "name": "Node.js",
+  "version": "1.0.0",
+  "description": "Node.js process management for local development. Spawns and supervises per-site Node.js HTTP servers (npm start, npm run dev, or custom commands). Handles process lifecycle, log streaming, port readiness detection, and graceful shutdown. Works with Express, Next.js, Nuxt, Fastify, and any Node.js framework.",
+  "provides": ["service"],
+  "permissions": ["process.spawn", "network.listen"]
+}
