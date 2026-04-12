@@ -2,7 +2,7 @@
   "id": "nks.wdc.hosts",
   "displayName": "Hosts Manager",
   "version": "1.0.0",
-  "description": "Manages entries in the Windows hosts file within a delimited managed block. Supports adding, removing, and listing domain-to-IP mappings.",
+  "description": "Manages Windows hosts file entries within a delimited managed block (# BEGIN/END NKS WebDev Console). Auto-adds 127.0.0.1 mappings for every site domain + alias on site creation, removes them on deletion, and recalculates the block after site edits. Requests UAC elevation only when the hosts file actually needs an update (skips when unchanged). Keeps a 5-backup rotation of the hosts file before each write so accidental corruption can be rolled back. Also triggers DNS cache flush (ipconfig /flushdns) after block changes so the new domains resolve immediately.",
   "author": "NKS",
   "license": "Apache-2.0",
   "entryAssembly": "NKS.WebDevConsole.Plugin.Hosts.dll",

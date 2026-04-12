@@ -2,7 +2,7 @@
   "id": "nks.wdc.ssl",
   "displayName": "SSL (mkcert)",
   "version": "1.0.0",
-  "description": "SSL certificate management via mkcert. Local CA installation, per-domain certificate generation, and certificate lifecycle management.",
+  "description": "Local HTTPS certificate management via mkcert. Installs a trusted root CA into the Windows/macOS/Linux certificate store on first run (one-time admin prompt), then generates per-domain cert.pem + key.pem pairs under ~/.wdc/ssl/sites/{domain}/ whenever a site enables SSL. Supports wildcard SANs (*.myapp.loc) so alias subdomains share the parent cert. The SiteOrchestrator calls GenerateCert automatically on site create/update when sslEnabled=true — no manual cert management needed. Certs are locally trusted: Chrome, Firefox, Edge, and curl all accept them without --insecure flags.",
   "author": "NKS",
   "license": "Apache-2.0",
   "entryAssembly": "NKS.WebDevConsole.Plugin.SSL.dll",
