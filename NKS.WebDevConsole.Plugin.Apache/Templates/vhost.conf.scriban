@@ -35,7 +35,11 @@
         Require all granted
     </Directory>
 
-    {{ if site.php_enabled -}}
+    {{ if site.node_proxy_port > 0 -}}
+    ProxyPreserveHost On
+    ProxyPass / http://localhost:{{ site.node_proxy_port }}/
+    ProxyPassReverse / http://localhost:{{ site.node_proxy_port }}/
+    {{- else if site.php_enabled -}}
     DirectoryIndex index.php index.html
 
     {{ if is_windows -}}
@@ -73,7 +77,13 @@
         Require all granted
     </Directory>
 
-    {{ if site.php_enabled -}}
+    {{ if site.node_proxy_port > 0 -}}
+    # Node.js reverse proxy — Apache forwards all requests to the
+    # app's built-in HTTP listener. No DocumentRoot serving, no PHP.
+    ProxyPreserveHost On
+    ProxyPass / http://localhost:{{ site.node_proxy_port }}/
+    ProxyPassReverse / http://localhost:{{ site.node_proxy_port }}/
+    {{- else if site.php_enabled -}}
     DirectoryIndex index.php index.html
 
     {{ if is_windows -}}

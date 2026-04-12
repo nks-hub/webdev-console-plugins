@@ -239,7 +239,11 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
                 domain = site.Domain,
                 aliases = site.Aliases ?? Array.Empty<string>(),
                 root = site.DocumentRoot,
-                php_enabled = !string.IsNullOrEmpty(site.PhpVersion) && site.PhpVersion != "none",
+                // Node proxy takes precedence over PHP — when set, Apache
+                // acts as a pure reverse proxy and ignores php_enabled.
+                node_proxy_port = site.NodeUpstreamPort,
+                php_enabled = site.NodeUpstreamPort == 0
+                    && !string.IsNullOrEmpty(site.PhpVersion) && site.PhpVersion != "none",
                 php_version = site.PhpVersion,
                 php_fcgi_port = phpPort,
                 ssl = site.SslEnabled && !string.IsNullOrEmpty(certPath),
