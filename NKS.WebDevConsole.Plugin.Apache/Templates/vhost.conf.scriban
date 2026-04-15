@@ -27,16 +27,18 @@
     # rejects and produce a 500 on every request. Setting the parent to
     # AllowOverride None makes Apache skip them entirely.
     {{ if site.root_parent -}}
-    # MAMP parity: permit any legacy .htaccess in the document root's
-    # parent to execute under the same permissive AllowOverride the
-    # child DocumentRoot uses. Without this, Apache 2.4 still scans the
-    # parent .htaccess during the per-request walk and rejects
-    # directives like <IfModule> with `not allowed here`, producing a
-    # 500 on every request. Projects migrated from MAMP frequently have
-    # a redirect stub at that level (e.g. `RewriteRule ^$ www/`).
+    # Stop Apache from walking into any legacy .htaccess in the
+    # document root's PARENT directory. MAMP migrations frequently
+    # leave stubs like `RewriteRule ^$ www/` or `php_value …` one level
+    # above the served directory; these directives are either
+    # irrelevant (DocumentRoot is already the www child) or
+    # incompatible with mod_fcgid (`php_value` requires mod_php which
+    # WDC does not ship) and cause a hard 500 on every request when
+    # Apache tries to parse them. Setting AllowOverride None here
+    # makes Apache skip the parent .htaccess entirely without
+    # touching the user's files.
     <Directory "{{ site.root_parent | string.replace '\\' '/' }}">
-        AllowOverride All
-        Require all granted
+        AllowOverride None
     </Directory>
     {{- end }}
 
@@ -92,16 +94,18 @@
     DocumentRoot "{{ site.root | string.replace '\\' '/' }}"
 
     {{ if site.root_parent -}}
-    # MAMP parity: permit any legacy .htaccess in the document root's
-    # parent to execute under the same permissive AllowOverride the
-    # child DocumentRoot uses. Without this, Apache 2.4 still scans the
-    # parent .htaccess during the per-request walk and rejects
-    # directives like <IfModule> with `not allowed here`, producing a
-    # 500 on every request. Projects migrated from MAMP frequently have
-    # a redirect stub at that level (e.g. `RewriteRule ^$ www/`).
+    # Stop Apache from walking into any legacy .htaccess in the
+    # document root's PARENT directory. MAMP migrations frequently
+    # leave stubs like `RewriteRule ^$ www/` or `php_value …` one level
+    # above the served directory; these directives are either
+    # irrelevant (DocumentRoot is already the www child) or
+    # incompatible with mod_fcgid (`php_value` requires mod_php which
+    # WDC does not ship) and cause a hard 500 on every request when
+    # Apache tries to parse them. Setting AllowOverride None here
+    # makes Apache skip the parent .htaccess entirely without
+    # touching the user's files.
     <Directory "{{ site.root_parent | string.replace '\\' '/' }}">
-        AllowOverride All
-        Require all granted
+        AllowOverride None
     </Directory>
     {{- end }}
 
