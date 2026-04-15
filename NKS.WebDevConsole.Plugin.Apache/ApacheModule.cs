@@ -226,6 +226,17 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             }
         }
 
+        // Per-site php.ini override path: if the daemon's SitePhpIniWriter
+        // has generated one under ~/.wdc/sites-php/{domain}/php.ini we emit
+        // `FcgidInitialEnv PHPRC ...` in the vhost so php-cgi loads that
+        // file instead of the global one. Null → template skips the block.
+        var sitePhpIni = ResolveSitePhpIniPath(site.Domain);
+
+        // Pull per-site Apache / mod_fcgid tuning out of the site config.
+        // Missing values render as empty strings in the template and the
+        // corresponding directive is skipped via `{{ if site.xxx }}`.
+        var apacheSettings = site.ApacheSettings;
+
         var model = new
         {
             site = new
@@ -237,6 +248,13 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
                 // to emit an `AllowOverride None` stanza so Apache does not
                 // walk into legacy .htaccess files above the served dir.
                 root_parent = SafeParent(site.DocumentRoot),
+                php_ini_path = sitePhpIni ?? string.Empty,
+                apache_timeout = apacheSettings?.Timeout,
+                fcgid_io_timeout = apacheSettings?.FcgidIOTimeout,
+                fcgid_busy_timeout = apacheSettings?.FcgidBusyTimeout,
+                fcgid_idle_timeout = apacheSettings?.FcgidIdleTimeout,
+                fcgid_process_life_time = apacheSettings?.FcgidProcessLifeTime,
+                fcgid_max_request_len = apacheSettings?.FcgidMaxRequestLen,
                 // Node proxy takes precedence over PHP — when set, Apache
                 // acts as a pure reverse proxy and ignores php_enabled.
                 node_proxy_port = site.NodeUpstreamPort,
@@ -285,6 +303,25 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         if (!Directory.Exists(sslSitesDir)) return false;
         return Directory.GetDirectories(sslSitesDir)
             .Any(d => File.Exists(Path.Combine(d, "cert.pem")));
+    }
+
+    /// <summary>
+    /// Returns the absolute path to a per-site <c>php.ini</c> override if
+    /// <c>SitePhpIniWriter</c> has generated one for the given domain,
+    /// otherwise null. Template uses <c>{{ if site.php_ini_path }}</c> so
+    /// an empty/absent file cleanly skips the <c>FcgidInitialEnv</c> line.
+    /// </summary>
+    private static string? ResolveSitePhpIniPath(string domain)
+    {
+        try
+        {
+            var path = Path.Combine(WdcPaths.Root, "sites-php", domain, "php.ini");
+            return File.Exists(path) ? path : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>

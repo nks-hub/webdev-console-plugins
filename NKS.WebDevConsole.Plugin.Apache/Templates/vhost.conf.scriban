@@ -20,12 +20,10 @@
     {{- end }}
     DocumentRoot "{{ site.root | string.replace '\\' '/' }}"
 
-    # Lock down parent-directory .htaccess scanning. Apache 2.4 walks up
-    # from DocumentRoot looking for .htaccess files in every enclosing
-    # directory; legacy files above the doc root (e.g. a MAMP-era
-    # redirect stub) can contain directives the current AllowOverride
-    # rejects and produce a 500 on every request. Setting the parent to
-    # AllowOverride None makes Apache skip them entirely.
+    {{ if site.apache_timeout -}}
+    Timeout {{ site.apache_timeout }}
+    {{- end }}
+
     {{ if site.root_parent -}}
     # Stop Apache from walking into any legacy .htaccess in the
     # document root's PARENT directory. MAMP migrations frequently
@@ -68,10 +66,32 @@
     {{- else if site.php_enabled -}}
     DirectoryIndex index.php index.html
 
+    {{ if site.fcgid_max_request_len -}}
+    FcgidMaxRequestLen {{ site.fcgid_max_request_len }}
+    {{- end }}
+    {{ if site.fcgid_io_timeout -}}
+    FcgidIOTimeout {{ site.fcgid_io_timeout }}
+    {{- end }}
+    {{ if site.fcgid_busy_timeout -}}
+    FcgidBusyTimeout {{ site.fcgid_busy_timeout }}
+    {{- end }}
+    {{ if site.fcgid_idle_timeout -}}
+    FcgidIdleTimeout {{ site.fcgid_idle_timeout }}
+    {{- end }}
+    {{ if site.fcgid_process_life_time -}}
+    FcgidProcessLifeTime {{ site.fcgid_process_life_time }}
+    {{- end }}
+
     {{ if is_windows -}}
     <FilesMatch "\.php$">
         Options +ExecCGI
         AddHandler fcgid-script .php
+        {{ if site.php_ini_path -}}
+        # Per-site php.ini override — see ~/.wdc/sites-php/{{ site.domain }}/.
+        # FcgidInitialEnv injects PHPRC into the child process environment
+        # so php-cgi.exe loads this file instead of the global one.
+        FcgidInitialEnv PHPRC "{{ site.php_ini_path | string.replace '\\' '/' }}"
+        {{- end }}
         FcgidWrapper "{{ php_cgi_path | string.replace '\\' '/' }}" .php
     </FilesMatch>
     {{- else -}}
@@ -96,6 +116,10 @@
     ServerAlias {{ for a in site.aliases }}{{ a }} {{ end }}
     {{- end }}
     DocumentRoot "{{ site.root | string.replace '\\' '/' }}"
+
+    {{ if site.apache_timeout -}}
+    Timeout {{ site.apache_timeout }}
+    {{- end }}
 
     {{ if site.root_parent -}}
     # Stop Apache from walking into any legacy .htaccess in the
@@ -132,10 +156,32 @@
     {{- else if site.php_enabled -}}
     DirectoryIndex index.php index.html
 
+    {{ if site.fcgid_max_request_len -}}
+    FcgidMaxRequestLen {{ site.fcgid_max_request_len }}
+    {{- end }}
+    {{ if site.fcgid_io_timeout -}}
+    FcgidIOTimeout {{ site.fcgid_io_timeout }}
+    {{- end }}
+    {{ if site.fcgid_busy_timeout -}}
+    FcgidBusyTimeout {{ site.fcgid_busy_timeout }}
+    {{- end }}
+    {{ if site.fcgid_idle_timeout -}}
+    FcgidIdleTimeout {{ site.fcgid_idle_timeout }}
+    {{- end }}
+    {{ if site.fcgid_process_life_time -}}
+    FcgidProcessLifeTime {{ site.fcgid_process_life_time }}
+    {{- end }}
+
     {{ if is_windows -}}
     <FilesMatch "\.php$">
         Options +ExecCGI
         AddHandler fcgid-script .php
+        {{ if site.php_ini_path -}}
+        # Per-site php.ini override — see ~/.wdc/sites-php/{{ site.domain }}/.
+        # FcgidInitialEnv injects PHPRC into the child process environment
+        # so php-cgi.exe loads this file instead of the global one.
+        FcgidInitialEnv PHPRC "{{ site.php_ini_path | string.replace '\\' '/' }}"
+        {{- end }}
         FcgidWrapper "{{ php_cgi_path | string.replace '\\' '/' }}" .php
     </FilesMatch>
     {{- else -}}
