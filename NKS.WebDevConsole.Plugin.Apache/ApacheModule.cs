@@ -706,7 +706,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
     private ProcessStartInfo BuildStartInfo()
     {
         var configPath = ResolveConfigPath();
-        return new ProcessStartInfo
+        var psi = new ProcessStartInfo
         {
             FileName = _config.ExecutablePath,
             Arguments = $"-f \"{configPath}\" -D FOREGROUND",
@@ -716,6 +716,29 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             CreateNoWindow = true,
             WorkingDirectory = _config.ServerRoot
         };
+
+        // On Windows, propagate the user's TEMP / TMP / USERPROFILE into the
+        // Apache child process environment. php-cgi inherits these and falls
+        // back to `C:\Windows` (read-only for non-admin users) when they are
+        // missing, which breaks Tracy session writes, uploads, and anything
+        // using sys_get_temp_dir() on sites migrated from MAMP.
+        if (OperatingSystem.IsWindows())
+        {
+            var tempDir = Path.GetTempPath();
+            if (!string.IsNullOrEmpty(tempDir))
+            {
+                var trimmed = tempDir.TrimEnd('\\', '/');
+                psi.Environment["TEMP"] = trimmed;
+                psi.Environment["TMP"] = trimmed;
+            }
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!string.IsNullOrEmpty(userProfile))
+            {
+                psi.Environment["USERPROFILE"] = userProfile;
+            }
+        }
+
+        return psi;
     }
 
     private string ResolveConfigPath()
