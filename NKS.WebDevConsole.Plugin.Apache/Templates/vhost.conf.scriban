@@ -83,15 +83,17 @@
     {{- end }}
 
     {{ if is_windows -}}
+    {{ if site.php_ini_path != '' -}}
+    # Per-site php.ini override — see ~/.wdc/sites-php/{{ site.domain }}/.
+    # FcgidInitialEnv must live at the VirtualHost / Directory scope
+    # (not inside FilesMatch) — it injects PHPRC into the php-cgi
+    # child process environment so the forked interpreter loads this
+    # file instead of the global one.
+    FcgidInitialEnv PHPRC "{{ site.php_ini_path | string.replace '\\' '/' }}"
+    {{- end }}
     <FilesMatch "\.php$">
         Options +ExecCGI
         AddHandler fcgid-script .php
-        {{ if site.php_ini_path -}}
-        # Per-site php.ini override — see ~/.wdc/sites-php/{{ site.domain }}/.
-        # FcgidInitialEnv injects PHPRC into the child process environment
-        # so php-cgi.exe loads this file instead of the global one.
-        FcgidInitialEnv PHPRC "{{ site.php_ini_path | string.replace '\\' '/' }}"
-        {{- end }}
         FcgidWrapper "{{ php_cgi_path | string.replace '\\' '/' }}" .php
     </FilesMatch>
     {{- else -}}
@@ -173,15 +175,17 @@
     {{- end }}
 
     {{ if is_windows -}}
+    {{ if site.php_ini_path != '' -}}
+    # Per-site php.ini override — see ~/.wdc/sites-php/{{ site.domain }}/.
+    # FcgidInitialEnv must live at the VirtualHost / Directory scope
+    # (not inside FilesMatch) — it injects PHPRC into the php-cgi
+    # child process environment so the forked interpreter loads this
+    # file instead of the global one.
+    FcgidInitialEnv PHPRC "{{ site.php_ini_path | string.replace '\\' '/' }}"
+    {{- end }}
     <FilesMatch "\.php$">
         Options +ExecCGI
         AddHandler fcgid-script .php
-        {{ if site.php_ini_path -}}
-        # Per-site php.ini override — see ~/.wdc/sites-php/{{ site.domain }}/.
-        # FcgidInitialEnv injects PHPRC into the child process environment
-        # so php-cgi.exe loads this file instead of the global one.
-        FcgidInitialEnv PHPRC "{{ site.php_ini_path | string.replace '\\' '/' }}"
-        {{- end }}
         FcgidWrapper "{{ php_cgi_path | string.replace '\\' '/' }}" .php
     </FilesMatch>
     {{- else -}}
