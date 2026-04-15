@@ -233,6 +233,10 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
                 domain = site.Domain,
                 aliases = site.Aliases ?? Array.Empty<string>(),
                 root = site.DocumentRoot,
+                // Parent of the document root — used by the vhost template
+                // to emit an `AllowOverride None` stanza so Apache does not
+                // walk into legacy .htaccess files above the served dir.
+                root_parent = SafeParent(site.DocumentRoot),
                 // Node proxy takes precedence over PHP — when set, Apache
                 // acts as a pure reverse proxy and ignores php_enabled.
                 node_proxy_port = site.NodeUpstreamPort,
@@ -281,6 +285,26 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         if (!Directory.Exists(sslSitesDir)) return false;
         return Directory.GetDirectories(sslSitesDir)
             .Any(d => File.Exists(Path.Combine(d, "cert.pem")));
+    }
+
+    /// <summary>
+    /// Returns the parent directory of the given document root, or an empty
+    /// string when the path has no parent (drive root, empty string, or a
+    /// path we cannot canonicalise). Template uses `{{ if site.root_parent }}`
+    /// so emitting "" cleanly skips the parent-lock stanza.
+    /// </summary>
+    private static string SafeParent(string? docRoot)
+    {
+        if (string.IsNullOrWhiteSpace(docRoot)) return "";
+        try
+        {
+            var parent = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(docRoot));
+            return string.IsNullOrEmpty(parent) ? "" : parent;
+        }
+        catch
+        {
+            return "";
+        }
     }
 
     private static async Task<string> LoadEmbeddedTemplateAsync(string name)

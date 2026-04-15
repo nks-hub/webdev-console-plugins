@@ -20,6 +20,18 @@
     {{- end }}
     DocumentRoot "{{ site.root | string.replace '\\' '/' }}"
 
+    # Lock down parent-directory .htaccess scanning. Apache 2.4 walks up
+    # from DocumentRoot looking for .htaccess files in every enclosing
+    # directory; legacy files above the doc root (e.g. a MAMP-era
+    # redirect stub) can contain directives the current AllowOverride
+    # rejects and produce a 500 on every request. Setting the parent to
+    # AllowOverride None makes Apache skip them entirely.
+    {{ if site.root_parent -}}
+    <Directory "{{ site.root_parent | string.replace '\\' '/' }}">
+        AllowOverride None
+    </Directory>
+    {{- end }}
+
     SSLEngine on
     SSLCertificateFile "{{ site.cert_path | string.replace '\\' '/' }}"
     SSLCertificateKeyFile "{{ site.key_path | string.replace '\\' '/' }}"
@@ -70,6 +82,12 @@
     ServerAlias {{ for a in site.aliases }}{{ a }} {{ end }}
     {{- end }}
     DocumentRoot "{{ site.root | string.replace '\\' '/' }}"
+
+    {{ if site.root_parent -}}
+    <Directory "{{ site.root_parent | string.replace '\\' '/' }}">
+        AllowOverride None
+    </Directory>
+    {{- end }}
 
     <Directory "{{ site.root | string.replace '\\' '/' }}">
         Options FollowSymLinks MultiViews
