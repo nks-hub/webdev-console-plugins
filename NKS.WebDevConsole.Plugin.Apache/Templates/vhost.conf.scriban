@@ -27,8 +27,16 @@
     # rejects and produce a 500 on every request. Setting the parent to
     # AllowOverride None makes Apache skip them entirely.
     {{ if site.root_parent -}}
+    # MAMP parity: permit any legacy .htaccess in the document root's
+    # parent to execute under the same permissive AllowOverride the
+    # child DocumentRoot uses. Without this, Apache 2.4 still scans the
+    # parent .htaccess during the per-request walk and rejects
+    # directives like <IfModule> with `not allowed here`, producing a
+    # 500 on every request. Projects migrated from MAMP frequently have
+    # a redirect stub at that level (e.g. `RewriteRule ^$ www/`).
     <Directory "{{ site.root_parent | string.replace '\\' '/' }}">
-        AllowOverride None
+        AllowOverride All
+        Require all granted
     </Directory>
     {{- end }}
 
@@ -84,8 +92,16 @@
     DocumentRoot "{{ site.root | string.replace '\\' '/' }}"
 
     {{ if site.root_parent -}}
+    # MAMP parity: permit any legacy .htaccess in the document root's
+    # parent to execute under the same permissive AllowOverride the
+    # child DocumentRoot uses. Without this, Apache 2.4 still scans the
+    # parent .htaccess during the per-request walk and rejects
+    # directives like <IfModule> with `not allowed here`, producing a
+    # 500 on every request. Projects migrated from MAMP frequently have
+    # a redirect stub at that level (e.g. `RewriteRule ^$ www/`).
     <Directory "{{ site.root_parent | string.replace '\\' '/' }}">
-        AllowOverride None
+        AllowOverride All
+        Require all granted
     </Directory>
     {{- end }}
 
