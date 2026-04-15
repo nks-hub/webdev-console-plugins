@@ -61,6 +61,10 @@ public sealed class PhpIniManager
             display_startup_errors = isDev ? "On" : "Off",
             post_max_size = "64M",
             upload_max_filesize = "32M",
+            // Forward slashes so the template renders the same way the rest
+            // of the Windows paths in php.ini do; PHP accepts either
+            // separator on Windows, but mixing them in one file reads badly.
+            temp_dir = Path.GetTempPath().TrimEnd('\\', '/').Replace('\\', '/'),
             timezone = opts.Timezone,
             xdebug_enabled = opts.XdebugEnabled,
             xdebug_so = opts.XdebugSo?.Replace('\\', '/') ?? string.Empty,
