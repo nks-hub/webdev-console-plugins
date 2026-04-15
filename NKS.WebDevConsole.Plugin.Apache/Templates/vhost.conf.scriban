@@ -52,7 +52,11 @@
     Header always set X-Frame-Options "SAMEORIGIN"
 
     <Directory "{{ site.root | string.replace '\\' '/' }}">
-        Options FollowSymLinks MultiViews
+        # Indexes: MAMP enables directory listing by default; we match
+        # that so a migrated htdocs/ root without an index file still
+        # shows its contents instead of 403. FollowSymLinks + MultiViews
+        # are retained from the original template.
+        Options Indexes FollowSymLinks MultiViews
         AllowOverride All
         Require all granted
     </Directory>
@@ -110,7 +114,11 @@
     {{- end }}
 
     <Directory "{{ site.root | string.replace '\\' '/' }}">
-        Options FollowSymLinks MultiViews
+        # Indexes: MAMP enables directory listing by default; we match
+        # that so a migrated htdocs/ root without an index file still
+        # shows its contents instead of 403. FollowSymLinks + MultiViews
+        # are retained from the original template.
+        Options Indexes FollowSymLinks MultiViews
         AllowOverride All
         Require all granted
     </Directory>
