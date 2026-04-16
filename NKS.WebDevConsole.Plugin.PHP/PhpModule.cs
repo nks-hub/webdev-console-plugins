@@ -456,6 +456,7 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
 
         var tag = php.MajorMinor.Replace(".", "");
         var socketPath = Path.Combine(_config.RunDirectory, $"php{tag}-fpm.sock");
+        var fcgiPort = php.FcgiPort > 0 ? php.FcgiPort : 9000;
 
         var scriptObj = new ScriptObject();
         scriptObj.Import(new
@@ -464,6 +465,7 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
             version_tag = tag,
             pool_name = $"nks-wdc-php{tag}",
             socket_path = socketPath,
+            fcgi_port = fcgiPort,
             run_dir = _config.RunDirectory.Replace('\\', '/'),
             log_dir = _config.LogDirectory.Replace('\\', '/'),
             tmp_dir = Path.GetTempPath().Replace('\\', '/'),

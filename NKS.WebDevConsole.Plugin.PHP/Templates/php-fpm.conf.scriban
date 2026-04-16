@@ -9,10 +9,11 @@ daemonize = no
 [{{ pool_name }}]
 user = {{ fpm_user }}
 group = {{ fpm_group }}
-listen = {{ socket_path }}
-listen.owner = {{ fpm_user }}
-listen.group = {{ fpm_group }}
-listen.mode = 0660
+; Listen on TCP — the Apache vhost template proxies PHP requests via
+; fcgi://127.0.0.1:<port> (port = 9000 + major*10 + minor, e.g. 8.5 → 9085).
+; TCP avoids unix-socket path assumptions and matches mod_proxy_fcgi.
+listen = 127.0.0.1:{{ fcgi_port }}
+listen.allowed_clients = 127.0.0.1
 
 pm = dynamic
 pm.max_children = {{ pm_max_children }}
