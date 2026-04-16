@@ -33,16 +33,25 @@ LoadModule alias_module modules/mod_alias.so
 LoadModule autoindex_module modules/mod_autoindex.so
 LoadModule vhost_alias_module modules/mod_vhost_alias.so
 
-# PHP FastCGI via mod_fcgid (Apache Lounge external module — installed by NKS WDC
-# BinaryManager during Apache install, fetched from apachelounge.com/download/VS18/modules/).
-# Avoids the drive-letter bug in mod_proxy_fcgi where the proxy URL gets the DocumentRoot
-# drive prefix concatenated to the host:port (e.g. fcgi://127.0.0.1:9084c:/...).
+{{ if is_windows }}
+# Windows: PHP FastCGI via mod_fcgid (Apache Lounge external module — installed
+# by NKS WDC BinaryManager from apachelounge.com/download/VS18/modules/).
+# Avoids the drive-letter bug in mod_proxy_fcgi where the proxy URL gets the
+# DocumentRoot drive prefix concatenated to the host:port.
 LoadModule fcgid_module modules/mod_fcgid.so
 LoadModule actions_module modules/mod_actions.so
 
-# mod_proxy_fcgi kept loaded as fallback only — not used in vhost templates
+# mod_proxy_fcgi kept loaded as fallback only — not used in vhost templates on Windows
 LoadModule proxy_module modules/mod_proxy.so
 LoadModule proxy_fcgi_module modules/mod_proxy_fcgi.so
+{{ else }}
+# macOS/Linux: PHP-FPM via mod_proxy_fcgi (built into Apache 2.4, no external module).
+# The PHP plugin spawns php-fpm on a per-version port (FastCGI socket),
+# vhost templates ProxyPassMatch .php to fcgi://127.0.0.1:<port>.
+LoadModule proxy_module modules/mod_proxy.so
+LoadModule proxy_fcgi_module modules/mod_proxy_fcgi.so
+LoadModule actions_module modules/mod_actions.so
+{{ end }}
 
 {{ if ssl_enabled }}
 LoadModule ssl_module modules/mod_ssl.so
