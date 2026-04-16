@@ -38,13 +38,14 @@ public sealed class MySqlConfig
             .OrderByDescending(d => Path.GetFileName(d), SemverVersionComparer.Instance)
             .ToList();
 
+        var ext = OperatingSystem.IsWindows() ? ".exe" : "";
         foreach (var vdir in versionDirs)
         {
-            var mysqld = Path.Combine(vdir, "bin", "mysqld.exe");
+            var mysqld = Path.Combine(vdir, "bin", "mysqld" + ext);
             if (!File.Exists(mysqld)) continue;
 
             ExecutablePath = mysqld;
-            MysqladminPath = Path.Combine(vdir, "bin", "mysqladmin.exe");
+            MysqladminPath = Path.Combine(vdir, "bin", "mysqladmin" + ext);
             return true;
         }
         return false;
@@ -164,10 +165,11 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
         if (!_needsPasswordSet) return;
         if (string.IsNullOrEmpty(_config.ExecutablePath)) return;
 
-        var mysqlCli = Path.Combine(Path.GetDirectoryName(_config.ExecutablePath)!, "mysql.exe");
+        var cliExt = OperatingSystem.IsWindows() ? ".exe" : "";
+        var mysqlCli = Path.Combine(Path.GetDirectoryName(_config.ExecutablePath)!, "mysql" + cliExt);
         if (!File.Exists(mysqlCli))
         {
-            _logger.LogWarning("mysql.exe not found next to mysqld — cannot set root password");
+            _logger.LogWarning("mysql{Ext} not found next to mysqld — cannot set root password", cliExt);
             return;
         }
 

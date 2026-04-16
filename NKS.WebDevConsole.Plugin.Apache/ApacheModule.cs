@@ -94,9 +94,10 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             .OrderByDescending(d => Path.GetFileName(d), SemverVersionComparer.Instance)
             .ToList();
 
+        var httpdName = OperatingSystem.IsWindows() ? "httpd.exe" : "httpd";
         foreach (var versionDir in versionDirs)
         {
-            var ownHttpd = Path.Combine(versionDir, "bin", "httpd.exe");
+            var ownHttpd = Path.Combine(versionDir, "bin", httpdName);
             if (!File.Exists(ownHttpd)) continue;
 
             _config.ExecutablePath = ownHttpd;
@@ -115,7 +116,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             return;
         }
 
-        _logger.LogWarning("No httpd.exe found under any version dir in {Root}", _config.BinariesRoot);
+        _logger.LogWarning("No {Httpd} found under any version dir in {Root}", httpdName, _config.BinariesRoot);
     }
 
     /// <summary>
