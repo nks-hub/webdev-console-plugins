@@ -30,17 +30,27 @@ public sealed class PhpPlugin : IWdcPlugin, IFrontendPanelProvider
         services.AddSingleton<PhpExtensionManager>();
         services.AddSingleton<PhpCliAliasManager>();
 
-        // PhpModuleConfig resolved from daemon AppConfig in production
+        // PhpModuleConfig resolved from daemon AppConfig in production. Logs and
+        // run-state live in the user's WDC data dir (~/.wdc/logs and ~/.wdc/data/run)
+        // so the daemon doesn't need write access into its own install directory —
+        // a hard requirement for /Applications-installed Mac apps where the bundle
+        // is read-only — and so the path survives reinstalls/upgrades.
         services.AddSingleton(sp =>
         {
             var appDir = AppContext.BaseDirectory;
+            var logDir = Path.Combine(NKS.WebDevConsole.Core.Services.WdcPaths.LogsRoot, "php");
+            var runDir = Path.Combine(NKS.WebDevConsole.Core.Services.WdcPaths.DataRoot, "run");
+            var configDir = Path.Combine(NKS.WebDevConsole.Core.Services.WdcPaths.DataRoot, "php");
+            Directory.CreateDirectory(logDir);
+            Directory.CreateDirectory(runDir);
+            Directory.CreateDirectory(configDir);
             return new PhpModuleConfig
             {
                 AppDirectory = appDir,
-                ConfigBaseDirectory = Path.Combine(appDir, "config", "php"),
+                ConfigBaseDirectory = configDir,
                 ShimDirectory = Path.Combine(appDir, "bin"),
-                LogDirectory = Path.Combine(appDir, "logs"),
-                RunDirectory = Path.GetTempPath()
+                LogDirectory = logDir,
+                RunDirectory = runDir
             };
         });
 
