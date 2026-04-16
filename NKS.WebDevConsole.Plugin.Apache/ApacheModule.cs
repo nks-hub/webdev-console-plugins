@@ -27,8 +27,11 @@ public sealed class ApacheConfig
     // when the repo src dir was the cwd.
     public string VhostsDirectory { get; set; } = Path.Combine(WdcPaths.GeneratedRoot, "apache", "sites-enabled");
     public string LogDirectory { get; set; } = Path.Combine(WdcPaths.LogsRoot, "apache");
-    public int HttpPort { get; set; } = 80;
-    public int HttpsPort { get; set; } = 443;
+    // Default to privileged ports (80/443) on Windows where the service runs
+    // as admin; on macOS/Linux fall back to 8080/8443 so the daemon can bind
+    // without sudo. Users with privileged-port plans override via settings.
+    public int HttpPort { get; set; } = OperatingSystem.IsWindows() ? 80 : 8080;
+    public int HttpsPort { get; set; } = OperatingSystem.IsWindows() ? 443 : 8443;
     public int GracefulTimeoutSecs { get; set; } = 30;
 }
 
@@ -131,8 +134,8 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         {
             generated_at = DateTime.UtcNow.ToString("u"),
             server_root = _config.ServerRoot,
-            http_port = 80,
-            https_port = 443,
+            http_port = _config.HttpPort,
+            https_port = _config.HttpsPort,
             ssl_enabled = HasAnySslCerts(),
             php_enabled = true,
             is_windows = OperatingSystem.IsWindows(),

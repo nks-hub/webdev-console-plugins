@@ -66,6 +66,7 @@
     {{- else if site.php_enabled -}}
     DirectoryIndex index.php index.html
 
+    {{ if is_windows -}}
     {{ if site.fcgid_max_request_len -}}
     FcgidMaxRequestLen {{ site.fcgid_max_request_len }}
     {{- end }}
@@ -80,6 +81,8 @@
     {{- end }}
     {{ if site.fcgid_process_life_time -}}
     FcgidProcessLifeTime {{ site.fcgid_process_life_time }}
+    {{- end }}
+
     {{- end }}
 
     {{ if is_windows -}}
@@ -97,8 +100,10 @@
         FcgidWrapper "{{ php_cgi_path | string.replace '\\' '/' }}" .php
     </FilesMatch>
     {{- else -}}
+    # macOS/Linux: proxy PHP requests to PHP-FPM listening on TCP port
+    # spawned by the NKS WDC PHP plugin (port = 9000 + major*10 + minor).
     <FilesMatch "\.php$">
-        SetHandler "proxy:unix:/run/php/php{{ site.php_version | string.replace '.' '' }}-fpm.sock|fcgi://localhost"
+        SetHandler "proxy:fcgi://127.0.0.1:{{ site.php_fcgi_port }}"
     </FilesMatch>
     {{- end }}
     {{- end }}
@@ -158,6 +163,7 @@
     {{- else if site.php_enabled -}}
     DirectoryIndex index.php index.html
 
+    {{ if is_windows -}}
     {{ if site.fcgid_max_request_len -}}
     FcgidMaxRequestLen {{ site.fcgid_max_request_len }}
     {{- end }}
@@ -172,6 +178,8 @@
     {{- end }}
     {{ if site.fcgid_process_life_time -}}
     FcgidProcessLifeTime {{ site.fcgid_process_life_time }}
+    {{- end }}
+
     {{- end }}
 
     {{ if is_windows -}}
@@ -189,8 +197,10 @@
         FcgidWrapper "{{ php_cgi_path | string.replace '\\' '/' }}" .php
     </FilesMatch>
     {{- else -}}
+    # macOS/Linux: proxy PHP requests to PHP-FPM listening on TCP port
+    # spawned by the NKS WDC PHP plugin (port = 9000 + major*10 + minor).
     <FilesMatch "\.php$">
-        SetHandler "proxy:unix:/run/php/php{{ site.php_version | string.replace '.' '' }}-fpm.sock|fcgi://localhost"
+        SetHandler "proxy:fcgi://127.0.0.1:{{ site.php_fcgi_port }}"
     </FilesMatch>
     {{- end }}
     {{- end }}
