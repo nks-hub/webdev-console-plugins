@@ -131,11 +131,36 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
 
         _logger.LogInformation("Initializing MySQL data dir at {Path} (first run)...", _config.DataDir);
 
-        var args = $"--initialize-insecure --datadir=\"{_config.DataDir}\" --console";
-        var result = await Cli.Wrap(_config.ExecutablePath)
-            .WithArguments(args)
-            .WithValidation(CommandResultValidation.None)
-            .ExecuteBufferedAsync(ct);
+        // MariaDB ≥ 10.4 doesn't accept `mysqld --initialize-insecure` (it's a
+        // MySQL-only flag). When the binary next to mysqld looks like MariaDB
+        // — most reliably detected by the presence of the `mariadb-install-db`
+        // helper in the same bin/ — use that instead. Otherwise fall back to
+        // upstream MySQL's `--initialize-insecure`.
+        var binDir = Path.GetDirectoryName(_config.ExecutablePath)!;
+        var ext = OperatingSystem.IsWindows() ? ".exe" : "";
+        var mariaInit = Path.Combine(binDir, "mariadb-install-db" + ext);
+        var isMariaDB = File.Exists(mariaInit);
+
+        Directory.CreateDirectory(_config.DataDir);
+
+        BufferedCommandResult result;
+        if (isMariaDB)
+        {
+            _logger.LogInformation("Detected MariaDB — using {Tool}", mariaInit);
+            var user = Environment.UserName;
+            result = await Cli.Wrap(mariaInit)
+                .WithArguments(new[] { $"--datadir={_config.DataDir}", $"--user={user}", "--auth-root-authentication-method=normal" })
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync(ct);
+        }
+        else
+        {
+            var args = $"--initialize-insecure --datadir=\"{_config.DataDir}\" --console";
+            result = await Cli.Wrap(_config.ExecutablePath)
+                .WithArguments(args)
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync(ct);
+        }
 
         if (result.ExitCode == 0)
         {
@@ -147,7 +172,7 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
         }
         else
         {
-            _logger.LogError("MySQL --initialize-insecure failed (exit {Code}): {Err}",
+            _logger.LogError("MySQL data-dir init failed (exit {Code}): {Err}",
                 result.ExitCode, result.StandardError.Trim());
         }
     }
