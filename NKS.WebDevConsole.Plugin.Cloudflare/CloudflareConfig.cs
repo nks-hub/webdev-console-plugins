@@ -180,7 +180,12 @@ public sealed class CloudflareConfig
         DefaultZoneId = DefaultZoneId,
         StartupTimeoutSecs = StartupTimeoutSecs,
         SubdomainTemplate = SubdomainTemplate,
-        ApiToken = string.IsNullOrEmpty(ApiToken) ? null : "••••••••" + ApiToken[^4..],
+        // Guard against tokens shorter than 4 chars (malformed / test input) —
+        // [^4..] would throw on length 0–3. Show fully masked for such values so
+        // the UI never echoes the raw (short) token back.
+        ApiToken = string.IsNullOrEmpty(ApiToken)
+            ? null
+            : ApiToken.Length < 4 ? "••••••••" : "••••••••" + ApiToken[^4..],
         TunnelToken = string.IsNullOrEmpty(TunnelToken) ? null : "••••••••",
     };
 }
