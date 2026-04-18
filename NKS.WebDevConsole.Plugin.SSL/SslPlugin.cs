@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NKS.WebDevConsole.Core.Interfaces;
@@ -17,7 +18,11 @@ public sealed class SslPlugin : IWdcPlugin
     private MkcertManager? _mkcert;
     private ILogger? _logger;
 
-    private readonly Dictionary<string, CertInfo> _certs = new(StringComparer.OrdinalIgnoreCase);
+    // ConcurrentDictionary so GenerateCert/RevokeCert/GetCerts/ScanExistingCerts
+    // stay safe under parallel HTTP handler calls (cert list + issue requests
+    // can race in the daemon's request-scoped pipeline). Case-insensitive match
+    // preserved via StringComparer.OrdinalIgnoreCase.
+    private readonly ConcurrentDictionary<string, CertInfo> _certs = new(StringComparer.OrdinalIgnoreCase);
     private string _certsBaseDir = null!;
 
     public void Initialize(IServiceCollection services, IPluginContext context)
@@ -143,7 +148,7 @@ public sealed class SslPlugin : IWdcPlugin
                 _logger?.LogError(
                     "Refusing to revoke cert for '{Domain}': directory '{Dir}' escapes certs base '{Base}'",
                     domain, resolvedDir, certsBaseFull);
-                _certs.Remove(domain);
+                _certs.TryRemove(domain, out _);
                 return false;
             }
 
@@ -159,7 +164,7 @@ public sealed class SslPlugin : IWdcPlugin
             }
         }
 
-        _certs.Remove(domain);
+        _certs.TryRemove(domain, out _);
         return true;
     }
 
