@@ -101,10 +101,26 @@ public sealed class NginxModule : IServiceModule
         if (string.IsNullOrEmpty(_config.VhostsDirectory))
             return Task.CompletedTask;
 
-        var path = Path.Combine(_config.VhostsDirectory, $"{domain}.conf");
-        if (File.Exists(path))
+        // Defense-in-depth: domain should already be validated upstream by
+        // SiteOrchestrator.ValidateDomain, but an extra containment check
+        // prevents File.Delete from escaping VhostsDirectory if a malformed
+        // SiteConfig ever reaches this code path (e.g. direct plugin call
+        // from a test harness).
+        var baseDir = Path.GetFullPath(_config.VhostsDirectory);
+        var requestedPath = Path.GetFullPath(Path.Combine(baseDir, $"{domain}.conf"));
+        if (!requestedPath.StartsWith(baseDir, StringComparison.OrdinalIgnoreCase))
         {
-            File.Delete(path);
+            _logger.LogWarning(
+                "Refused to remove nginx vhost outside managed dir — domain='{Domain}' resolved to '{Path}', base '{Base}'",
+                domain,
+                requestedPath,
+                baseDir);
+            return Task.CompletedTask;
+        }
+
+        if (File.Exists(requestedPath))
+        {
+            File.Delete(requestedPath);
             _logger.LogInformation("Removed nginx server block for {Domain}", domain);
         }
         return Task.CompletedTask;
