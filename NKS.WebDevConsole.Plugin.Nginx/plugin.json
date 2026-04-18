@@ -1,0 +1,20 @@
+{
+  "id": "nks.wdc.nginx",
+  "displayName": "Nginx",
+  "version": "1.0.0",
+  "description": "Nginx service module — manages nginx lifecycle, server-block generation, and config validation.",
+  "author": "NKS",
+  "license": "Apache-2.0",
+  "entryAssembly": "NKS.WebDevConsole.Plugin.Nginx.dll",
+  "entryType": "NKS.WebDevConsole.Plugin.Nginx.NginxPlugin",
+  "serviceId": "nginx",
+  "serviceType": "WebServer",
+  "defaultPorts": [80, 443],
+  "supportedPlatforms": ["windows", "macos", "linux"],
+  "minDaemonVersion": "1.0.0",
+  "dependencies": [],
+  "capabilities": [
+    "start", "stop", "reload", "validate-config",
+    "vhost-generation", "log-streaming", "health-check", "metrics"
+  ]
+}
