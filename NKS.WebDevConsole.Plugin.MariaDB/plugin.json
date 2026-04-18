@@ -1,0 +1,20 @@
+{
+  "id": "nks.wdc.mariadb",
+  "displayName": "MariaDB",
+  "version": "1.0.0",
+  "description": "MariaDB service module — drop-in MySQL-compatible RDBMS, manages mariadbd lifecycle, datadir init via mariadb-install-db, my.cnf templates, DPAPI-protected root password.",
+  "author": "NKS",
+  "license": "Apache-2.0",
+  "entryAssembly": "NKS.WebDevConsole.Plugin.MariaDB.dll",
+  "entryType": "NKS.WebDevConsole.Plugin.MariaDB.MariaDBPlugin",
+  "serviceId": "mariadb",
+  "serviceType": "Database",
+  "defaultPorts": [3306],
+  "supportedPlatforms": ["windows", "macos", "linux"],
+  "minDaemonVersion": "1.0.0",
+  "dependencies": [],
+  "capabilities": [
+    "start", "stop", "reload", "validate-config",
+    "log-streaming", "health-check", "metrics"
+  ]
+}
