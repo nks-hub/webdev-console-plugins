@@ -291,10 +291,27 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         if (string.IsNullOrEmpty(_config.VhostsDirectory))
             return Task.CompletedTask;
 
-        var path = Path.Combine(_config.VhostsDirectory, $"{domain}.conf");
-        if (File.Exists(path))
+        // Defense-in-depth: domain is already validated upstream by
+        // SiteOrchestrator.ValidateDomain, but an extra containment check
+        // prevents File.Delete from escaping VhostsDirectory if a malformed
+        // SiteConfig ever reaches this code path (e.g. direct plugin call
+        // from a test harness or future API that skips validation).
+        // Mirrors nginx fix (commit 8a2e86b, wdc-todo:nginx-path-traversal).
+        var baseDir = Path.GetFullPath(_config.VhostsDirectory);
+        var requestedPath = Path.GetFullPath(Path.Combine(baseDir, $"{domain}.conf"));
+        if (!requestedPath.StartsWith(baseDir, StringComparison.OrdinalIgnoreCase))
         {
-            File.Delete(path);
+            _logger.LogWarning(
+                "Refused to remove apache vhost outside managed dir — domain='{Domain}' resolved to '{Path}', base '{Base}'",
+                domain,
+                requestedPath,
+                baseDir);
+            return Task.CompletedTask;
+        }
+
+        if (File.Exists(requestedPath))
+        {
+            File.Delete(requestedPath);
             _logger.LogInformation("Removed vhost for {Domain}", domain);
         }
 
