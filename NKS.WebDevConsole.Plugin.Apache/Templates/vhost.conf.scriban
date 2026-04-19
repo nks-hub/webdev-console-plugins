@@ -112,7 +112,8 @@
     Redirect {{ redirect.code ?? "301" }} {{ redirect.from }} {{ redirect.to }}
     {{ end -}}
 
-    CustomLog "${APACHE_LOG_DIR}/{{ site.domain }}-ssl-access.log" combined
+    LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\" \"%{X-Forwarded-For}i\" \"%{CF-Connecting-IP}i\"" wdc-combined
+    CustomLog "${APACHE_LOG_DIR}/{{ site.domain }}-ssl-access.log" wdc-combined
     ErrorLog "${APACHE_LOG_DIR}/{{ site.domain }}-ssl-error.log"
 </VirtualHost>
 {{- else -}}
@@ -209,7 +210,8 @@
     Redirect {{ redirect.code ?? "301" }} {{ redirect.from }} {{ redirect.to }}
     {{ end -}}
 
-    CustomLog "${APACHE_LOG_DIR}/{{ site.domain }}-access.log" combined
+    LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\" \"%{X-Forwarded-For}i\" \"%{CF-Connecting-IP}i\"" wdc-combined
+    CustomLog "${APACHE_LOG_DIR}/{{ site.domain }}-access.log" wdc-combined
     ErrorLog "${APACHE_LOG_DIR}/{{ site.domain }}-error.log"
 </VirtualHost>
 {{- end }}
