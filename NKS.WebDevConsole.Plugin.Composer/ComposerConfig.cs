@@ -32,6 +32,32 @@ public sealed class ComposerConfig
     /// <returns><c>true</c> if a managed phar was found; <c>false</c> if the PATH fallback is used.</returns>
     public bool ApplyOwnBinaryDefaults()
     {
+        // F33: Scan for a WDC-managed PHP binary FIRST so PhpPath is set
+        // regardless of whether the composer phar is found. Without this
+        // ordering, the original implementation returned early on phar-found
+        // and never reached the PHP scan, leaving PhpPath = "php" which
+        // fails on machines without system PHP on PATH.
+        var phpBinariesRoot = Path.Combine(Path.GetDirectoryName(BinariesRoot)!, "php");
+        if (Directory.Exists(phpBinariesRoot))
+        {
+            var phpVersionDirs = Directory.GetDirectories(phpBinariesRoot)
+                .Where(d => !Path.GetFileName(d).StartsWith('.'))
+                .OrderByDescending(d => Path.GetFileName(d), SemverVersionComparer.Instance)
+                .ToList();
+
+            foreach (var vdir in phpVersionDirs)
+            {
+                var phpExe = OperatingSystem.IsWindows()
+                    ? Path.Combine(vdir, "php.exe")
+                    : Path.Combine(vdir, "php");
+                if (File.Exists(phpExe))
+                {
+                    PhpPath = phpExe;
+                    break;
+                }
+            }
+        }
+
         if (Directory.Exists(BinariesRoot))
         {
             var versionDirs = Directory.GetDirectories(BinariesRoot)
@@ -54,33 +80,6 @@ public sealed class ComposerConfig
         // ComposerInvoker will detect whether this resolves to a phar invocation
         // or a native binary by inspecting the extension.
         ExecutablePath = OperatingSystem.IsWindows() ? "composer.bat" : "composer";
-
-        // Scan for a WDC-managed PHP binary under {WdcBinariesRoot}/php/.
-        // The PHP root is derived from the parent of BinariesRoot (the composer sub-dir)
-        // so that tests can redirect the whole tree via config.BinariesRoot without
-        // requiring WdcPaths.Root to be overridden (it caches on first access).
-        // Picks the newest semver version dir that contains php.exe / php.
-        // Falls back to the field default of "php" (PATH lookup) if nothing found.
-        var phpBinariesRoot = Path.Combine(Path.GetDirectoryName(BinariesRoot)!, "php");
-        if (Directory.Exists(phpBinariesRoot))
-        {
-            var phpVersionDirs = Directory.GetDirectories(phpBinariesRoot)
-                .Where(d => !Path.GetFileName(d).StartsWith('.'))
-                .OrderByDescending(d => Path.GetFileName(d), SemverVersionComparer.Instance)
-                .ToList();
-
-            foreach (var vdir in phpVersionDirs)
-            {
-                var phpExe = OperatingSystem.IsWindows()
-                    ? Path.Combine(vdir, "php.exe")
-                    : Path.Combine(vdir, "php");
-                if (File.Exists(phpExe))
-                {
-                    PhpPath = phpExe;
-                    break;
-                }
-            }
-        }
 
         return false;
     }
