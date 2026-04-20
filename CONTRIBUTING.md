@@ -19,8 +19,31 @@ dotnet restore
 dotnet build -c Release
 ```
 
-To load a plugin from its build output into a running daemon without
-publishing, point the daemon at the bin dir via:
+### Resolving `NKS.WebDevConsole.Plugin.SDK`
+
+Plugin csprojs reference the SDK via `PackageReference` inherited from
+`Directory.Build.props`. `dotnet restore` needs a source — two options:
+
+1. **Local release asset** (recommended, no auth): download the latest
+   `NKS.WebDevConsole.Plugin.SDK.<ver>.nupkg` from
+   <https://github.com/nks-hub/webdev-console/releases>, drop into
+   `./.local-nuget/`, add the folder to `nuget.config`:
+   ```xml
+   <add key="local-sdk" value=".local-nuget" />
+   ```
+   The CI workflow does the same via `gh release download` — see
+   `.github/workflows/ci.yml`.
+
+2. **GitHub Packages feed** (already in `nuget.config`). Needs a classic
+   PAT with `read:packages` scope. Export before `dotnet restore`:
+   ```cmd
+   set NUGET_GH_USERNAME=your-github-login
+   set NUGET_GH_TOKEN=ghp_...
+   ```
+   Cross-repo access may require the repo owner to link the package at
+   <https://github.com/orgs/nks-hub/packages/>.
+
+### Loading a local plugin into a running daemon
 
 ```cmd
 set NKS_WDC_PLUGINS_DEV_DIR=C:\work\sources\webdev-console-plugins\NKS.WebDevConsole.Plugin.MyPlugin\bin\Release\net9.0
