@@ -11,15 +11,14 @@ permissions:
   contents: read
 
 jobs:
-  # NOTE: plugin csprojs currently reference the Plugin.SDK via relative
-  # ProjectReference (`..\..\daemon\NKS.WebDevConsole.Plugin.SDK\...`)
-  # inherited from the monorepo layout. Until the SDK ships as a NuGet
-  # package (tracked as F100), the real build happens inside the main
-  # nks-ws CI where those relative paths resolve. Here we run a
-  # structural smoke check: verify every plugin has a csproj + plugin.json,
-  # validate JSON + XML parse, and fail loud if a plugin is missing
-  # either file. This prevents merging half-scaffolded plugins into
-  # main.
+  # F100 landed: plugin csprojs now reference Plugin.SDK as a NuGet
+  # PackageReference resolved from the NKS Hub GitHub Packages feed
+  # (see nuget.config + Directory.Build.props). This job runs a full
+  # `dotnet restore` + `dotnet build` to catch any drift between the
+  # published SDK version and what the plugins compile against.
+  # GITHUB_TOKEN already has read:packages on the runner, so no extra
+  # secret is needed — we just set the username/token env vars that
+  # nuget.config interpolates from.
   structure:
     runs-on: ubuntu-latest
     steps:
@@ -63,6 +62,38 @@ jobs:
             exit 1
           fi
           echo "All plugins structurally valid."
+
+  build:
+    runs-on: ubuntu-latest
+    needs: structure
+    env:
+      # nuget.config interpolates these to authenticate against the
+      # NKS Hub GitHub Packages feed. GITHUB_TOKEN on the default runner
+      # already carries read:packages scope for repositories in the
+      # same org (public packages are still behind auth on GH Packages).
+      NUGET_GH_USERNAME: ${{ github.actor }}
+      NUGET_GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '9.0.x'
+      - name: Restore (every plugin project)
+        run: |
+          set -e
+          for proj in NKS.WebDevConsole.Plugin.*/*.csproj; do
+            echo "::group::restore $proj"
+            dotnet restore "$proj"
+            echo "::endgroup::"
+          done
+      - name: Build (Release)
+        run: |
+          set -e
+          for proj in NKS.WebDevConsole.Plugin.*/*.csproj; do
+            echo "::group::build $proj"
+            dotnet build "$proj" -c Release --no-restore
+            echo "::endgroup::"
+          done
 
   docs:
     runs-on: ubuntu-latest
