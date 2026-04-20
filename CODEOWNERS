@@ -1,25 +1,30 @@
-# Default owners for everything in the repo.
-# Individual plugin directories can override below.
-*                                               @nks-hub/webdev-console-maintainers
+# Code owners — PRs touching these paths require review from the owner.
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-security/customizing-your-repository/about-code-owners
+#
+# Using individual owner (@lukyrys) rather than a team handle because the
+# nks-hub org does not currently expose a public maintainer team.
 
-# Per-plugin owners (placeholder — fill in as individuals claim areas)
-/NKS.WebDevConsole.Plugin.Apache/               @nks-hub/webdev-console-maintainers
-/NKS.WebDevConsole.Plugin.Nginx/                @nks-hub/webdev-console-maintainers
-/NKS.WebDevConsole.Plugin.PHP/                  @nks-hub/webdev-console-maintainers
-/NKS.WebDevConsole.Plugin.MySQL/                @nks-hub/webdev-console-maintainers
-/NKS.WebDevConsole.Plugin.MariaDB/              @nks-hub/webdev-console-maintainers
-/NKS.WebDevConsole.Plugin.Redis/                @nks-hub/webdev-console-maintainers
-/NKS.WebDevConsole.Plugin.Composer/             @nks-hub/webdev-console-maintainers
-/NKS.WebDevConsole.Plugin.Caddy/                @nks-hub/webdev-console-maintainers
-/NKS.WebDevConsole.Plugin.Cloudflare/           @nks-hub/webdev-console-maintainers
-/NKS.WebDevConsole.Plugin.Hosts/                @nks-hub/webdev-console-maintainers
-/NKS.WebDevConsole.Plugin.Mailpit/              @nks-hub/webdev-console-maintainers
-/NKS.WebDevConsole.Plugin.Node/                 @nks-hub/webdev-console-maintainers
-/NKS.WebDevConsole.Plugin.SSL/                  @nks-hub/webdev-console-maintainers
+*                                               @lukyrys
+
+# Per-plugin owners — currently all go to the default owner, ready to
+# reassign as contributors pick up specific plugins.
+/NKS.WebDevConsole.Plugin.Apache/               @lukyrys
+/NKS.WebDevConsole.Plugin.Nginx/                @lukyrys
+/NKS.WebDevConsole.Plugin.PHP/                  @lukyrys
+/NKS.WebDevConsole.Plugin.MySQL/                @lukyrys
+/NKS.WebDevConsole.Plugin.MariaDB/              @lukyrys
+/NKS.WebDevConsole.Plugin.Redis/                @lukyrys
+/NKS.WebDevConsole.Plugin.Composer/             @lukyrys
+/NKS.WebDevConsole.Plugin.Caddy/                @lukyrys
+/NKS.WebDevConsole.Plugin.Cloudflare/           @lukyrys
+/NKS.WebDevConsole.Plugin.Hosts/                @lukyrys
+/NKS.WebDevConsole.Plugin.Mailpit/              @lukyrys
+/NKS.WebDevConsole.Plugin.Node/                 @lukyrys
+/NKS.WebDevConsole.Plugin.SSL/                  @lukyrys
 
 # Core docs + CI
-/docs/                                          @nks-hub/webdev-console-maintainers
-/.github/                                       @nks-hub/webdev-console-maintainers
-/README.md                                      @nks-hub/webdev-console-maintainers
-/LICENSE                                        @nks-hub/webdev-console-maintainers
-/SECURITY.md                                    @nks-hub/webdev-console-maintainers
+/docs/                                          @lukyrys
+/.github/                                       @lukyrys
+/README.md                                      @lukyrys
+/LICENSE                                        @lukyrys
+/SECURITY.md                                    @lukyrys
