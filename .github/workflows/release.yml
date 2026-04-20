@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-plugins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Restore
+        run: dotnet restore
+      - name: Build all plugins (Release)
+        run: dotnet build -c Release --no-restore
+      - name: Package each plugin into its own zip
+        shell: bash
+        run: |
+          set -e
+          mkdir -p dist
+          for proj in NKS.WebDevConsole.Plugin.*/*.csproj; do
+            pname=$(basename "$(dirname "$proj")")
+            outdir="$(dirname "$proj")/bin/Release/net9.0"
+            if [ -d "$outdir" ]; then
+              (cd "$outdir" && zip -r "${GITHUB_WORKSPACE}/dist/${pname}.zip" .)
+              echo "packaged $pname"
+            else
+              echo "skip $pname — no build output"
+            fi
+          done
+          ls -la dist
+      - name: Upload zips as release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          fail_on_unmatched_files: true

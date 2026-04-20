@@ -1,0 +1,21 @@
+## Build output
+bin/
+obj/
+*.user
+*.suo
+
+## IDE / editor local configs
+.[a-z]*/
+!.git/
+!.github/
+
+## Temp + OS
+[Tt]humbs.db
+.DS_Store
+*.log
+
+## Uppercase root MD files that are agent-local, not repo docs
+/[A-Z]*.md
+!/README.md
+!/LICENSE.md
+!/CHANGELOG.md
