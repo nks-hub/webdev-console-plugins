@@ -1,0 +1,99 @@
+name: Auto-release on version bump
+
+# Detects plugin.json version changes on push to main and publishes a
+# per-plugin GitHub Release with the built .zip when that version does
+# not already have a release. Release tag format: <plugin-id>-v<version>
+# (e.g. nks.wdc.apache-v1.0.1). Idempotent — re-running on the same
+# commit with no version bump is a no-op.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'NKS.WebDevConsole.Plugin.*/plugin.json'
+  workflow_dispatch:
+    inputs:
+      force_plugin:
+        description: 'Force release for a single plugin directory (e.g. NKS.WebDevConsole.Plugin.Apache)'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  detect-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Detect changed plugins
+        id: detect
+        shell: bash
+        run: |
+          set -e
+          forced="${{ github.event.inputs.force_plugin }}"
+          if [ -n "$forced" ]; then
+            echo "forced run: $forced"
+            echo "changed=$forced" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Diff plugin.json files against parent commit
+          changed=""
+          for f in $(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" -- 'NKS.WebDevConsole.Plugin.*/plugin.json' 2>/dev/null || true); do
+            dir=$(dirname "$f")
+            changed="$changed $dir"
+          done
+          echo "changed=$(echo $changed | xargs)" >> "$GITHUB_OUTPUT"
+          echo "detected: $changed"
+
+      - name: Release each changed plugin
+        if: steps.detect.outputs.changed != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          mkdir -p dist
+          for dir in ${{ steps.detect.outputs.changed }}; do
+            manifest="$dir/plugin.json"
+            [ -f "$manifest" ] || { echo "skip $dir — no manifest"; continue; }
+
+            id=$(jq -r '.id' "$manifest")
+            version=$(jq -r '.version' "$manifest")
+            tag="${id}-v${version}"
+            pname=$(basename "$dir")
+
+            # Skip when release already exists for this version
+            if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "skip $id v$version — release $tag already exists"
+              continue
+            fi
+
+            echo "building $pname for release $tag"
+            dotnet restore "$dir"
+            dotnet build "$dir" -c Release --no-restore
+
+            outdir="$dir/bin/Release/net9.0"
+            if [ ! -d "$outdir" ]; then
+              echo "warn: $dir build output missing — skipping"
+              continue
+            fi
+
+            zipfile="dist/${pname}.zip"
+            (cd "$outdir" && zip -r "${GITHUB_WORKSPACE}/${zipfile}" .)
+
+            gh release create "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$id v$version" \
+              --notes "Auto-release on plugin.json version bump. Commit: ${GITHUB_SHA}" \
+              "$zipfile"
+
+            echo "released $tag"
+          done
