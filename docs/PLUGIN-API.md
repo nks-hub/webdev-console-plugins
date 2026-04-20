@@ -133,26 +133,44 @@ A plugin describes the UI surface it wants via the `GetUiDefinition()`
 hook (called by the daemon lazily on first enable):
 
 ```csharp
-public override PluginUiDefinition? GetUiDefinition() =>
+public override PluginUiDefinition GetUiDefinition() =>
     new UiSchemaBuilder(Id)
-        .Category("webserver")
-        .Icon("mdi:web")
-        .AddServiceCard("apache")
-        .AddLogViewer("apache")
-        .AddConfigEditor("apache")
-        .AddVersionSwitcher("apache")
-        .AddMetricsChart("apache")
+        .Category("Services")             // sidebar grouping label
+        .Icon("Link")                     // Element Plus component name
+        .AddNavEntry("cloudflare", "Cloudflare", "/cloudflare", "Link", order: 60)
+        .AddServiceCard("cloudflare")
+        .AddLogViewer("cloudflare")
+        .AddPanel("cloudflare-tunnel-panel", new() { ["serviceId"] = "cloudflare" })
         .Build();
 ```
 
-The Electron frontend consumes this at `/api/plugins` (per-plugin UI
-blobs under `plugins[].ui`) and dynamically renders:
+The Electron frontend consumes this at `/api/plugins/ui` (aggregator:
+returns nav entries from every enabled plugin) and `/api/plugins/{id}/ui`
+(per-plugin panels) and dynamically renders:
 
-- Sidebar nav entries grouped by `category` (when `ui.nav` is set)
+- **Sidebar nav entries** contributed via `AddNavEntry(id, label, route, icon, order)` —
+  rendered inside the `Tools` section of `AppSidebar.vue`. Each plugin
+  chooses its own route (e.g. `/composer`, `/ssl`). Disabling a plugin
+  removes its entries on the next catalog refresh.
 - Dashboard cards per service (`AddServiceCard`)
-- Per-site edit-tab panels (`AddPanel("site-edit", { tab: ... })`)
-- Built-in widgets: log viewer, config editor, version switcher,
-  metrics chart
+- Per-site edit-tab panels (`AddPanel("site-edit", { tab: … })`)
+- Built-in widgets: log viewer, config editor, version switcher, metrics chart
+
+### `NavContribution` schema
+
+```csharp
+public record NavContribution(
+    string Id,        // stable, e.g. "composer" — used as router route name
+    string Label,     // human-readable, e.g. "Composer"
+    string Icon,      // Element Plus v2 component name (Box, Files, Lock, Link, …)
+    string Route,     // router path, must start with "/" — e.g. "/composer"
+    int Order = 100); // sort key inside the category; lower = first
+```
+
+Icons resolve via a frontend registry — currently supports `Link`, `Download`,
+`Box`, `Setting`, `Coin`, `Lock`, `Cpu`, `House`, `Connection`, `Document`,
+`Files`, `QuestionFilled`, `User`, `UserFilled`. Unknown icon names fall back
+to `Box`.
 
 Disabling the plugin removes ALL of those UI contributions at once.
 See [`MANIFEST.md`](./MANIFEST.md) for the JSON-serializable shape.
