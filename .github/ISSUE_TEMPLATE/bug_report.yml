@@ -1,0 +1,56 @@
+name: Bug report
+description: Something in a plugin is broken or behaves unexpectedly
+labels: [bug]
+body:
+  - type: input
+    id: plugin
+    attributes:
+      label: Plugin
+      description: Which plugin is affected (e.g. `nks.wdc.apache`)
+      placeholder: nks.wdc.apache
+    validations:
+      required: true
+  - type: input
+    id: wdc-version
+    attributes:
+      label: WDC version
+      description: Version of NKS WebDev Console shown in Settings → About
+      placeholder: 0.1.62
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: Version reported in /plugins (or plugin.json)
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One-sentence description of the bug
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Enable plugin X
+        2. Start service Y
+        3. Click Z
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste the last ~50 lines from `~/.wdc/logs/<plugin-id>.log` if available (redact secrets).
+      render: shell

@@ -1,0 +1,25 @@
+# Default owners for everything in the repo.
+# Individual plugin directories can override below.
+*                                               @nks-hub/webdev-console-maintainers
+
+# Per-plugin owners (placeholder — fill in as individuals claim areas)
+/NKS.WebDevConsole.Plugin.Apache/               @nks-hub/webdev-console-maintainers
+/NKS.WebDevConsole.Plugin.Nginx/                @nks-hub/webdev-console-maintainers
+/NKS.WebDevConsole.Plugin.PHP/                  @nks-hub/webdev-console-maintainers
+/NKS.WebDevConsole.Plugin.MySQL/                @nks-hub/webdev-console-maintainers
+/NKS.WebDevConsole.Plugin.MariaDB/              @nks-hub/webdev-console-maintainers
+/NKS.WebDevConsole.Plugin.Redis/                @nks-hub/webdev-console-maintainers
+/NKS.WebDevConsole.Plugin.Composer/             @nks-hub/webdev-console-maintainers
+/NKS.WebDevConsole.Plugin.Caddy/                @nks-hub/webdev-console-maintainers
+/NKS.WebDevConsole.Plugin.Cloudflare/           @nks-hub/webdev-console-maintainers
+/NKS.WebDevConsole.Plugin.Hosts/                @nks-hub/webdev-console-maintainers
+/NKS.WebDevConsole.Plugin.Mailpit/              @nks-hub/webdev-console-maintainers
+/NKS.WebDevConsole.Plugin.Node/                 @nks-hub/webdev-console-maintainers
+/NKS.WebDevConsole.Plugin.SSL/                  @nks-hub/webdev-console-maintainers
+
+# Core docs + CI
+/docs/                                          @nks-hub/webdev-console-maintainers
+/.github/                                       @nks-hub/webdev-console-maintainers
+/README.md                                      @nks-hub/webdev-console-maintainers
+/LICENSE                                        @nks-hub/webdev-console-maintainers
+/SECURITY.md                                    @nks-hub/webdev-console-maintainers
