@@ -14,6 +14,6 @@
        UiSchemaBuilder, …). Published from the nks-ws monorepo's publish-sdk.yml
        workflow on each v* tag to nuget.pkg.github.com/nks-hub. -->
   <ItemGroup>
-    <PackageReference Include="NKS.WebDevConsole.Plugin.SDK" Version="0.1.82" />
+    <PackageReference Include="NKS.WebDevConsole.Plugin.SDK" Version="0.2.0" />
   </ItemGroup>
 </Project>
