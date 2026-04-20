@@ -42,7 +42,7 @@ jobs:
           done
           ls -la dist
       - name: Upload zips as release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*.zip
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
