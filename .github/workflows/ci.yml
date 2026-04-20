@@ -67,29 +67,46 @@ jobs:
           fi
           echo "All plugins structurally valid."
 
-  # Build validation runs only on manual trigger for now. GitHub Packages
-  # NuGet: a GITHUB_TOKEN issued inside this repository cannot read
-  # packages published from the nks-ws monorepo without an explicit link
-  # at the package-settings UI (a per-package manual opt-in on
-  # nks-hub/webdev-console's package list). Until that link is
-  # established, `dotnet restore` against the GH Packages source returns
-  # 403. Workaround path on the runner is an org-scoped PAT stored as a
-  # secret — left out here to avoid a hidden secret dependency in a
-  # public repo. For production builds the tag-triggered release.yml in
-  # this repo already performs a full dotnet build, so the CI gap here
-  # is a signal quality issue, not a correctness one.
+  # SDK nupkg is downloaded from the most recent nks-hub/webdev-console
+  # GitHub Release (attached by publish-sdk.yml in that repo) and added as
+  # a local NuGet source. This avoids the cross-repo GitHub Packages 403
+  # (a GITHUB_TOKEN from THIS repo has no read:packages scope on packages
+  # owned by sibling repos — github.com-side UI linking would be the
+  # alternative fix, not something the workflow can self-heal).
   build:
-    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     needs: structure
     env:
-      NUGET_GH_USERNAME: ${{ github.actor }}
-      NUGET_GH_TOKEN: ${{ secrets.NKS_HUB_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '9.0.x'
+      - name: Fetch SDK nupkg from monorepo release
+        run: |
+          set -e
+          mkdir -p .local-nuget
+          latest_tag=$(gh release list --repo nks-hub/webdev-console --limit 50 \
+            --json tagName --jq '.[].tagName' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          echo "Using SDK nupkg from release ${latest_tag}"
+          gh release download "${latest_tag}" \
+            --repo nks-hub/webdev-console \
+            --pattern '*.nupkg' \
+            --dir .local-nuget
+          ls -la .local-nuget
+      - name: Rewrite nuget.config to point at local feed
+        run: |
+          cat > nuget.config <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+              <add key="local-sdk" value=".local-nuget" />
+            </packageSources>
+          </configuration>
+          EOF
       - name: Restore (every plugin project)
         run: |
           set -e
