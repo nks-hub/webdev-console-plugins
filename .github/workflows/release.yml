@@ -17,8 +17,8 @@ jobs:
   build-plugins:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '9.0.x'
       - name: Restore
@@ -42,7 +42,7 @@ jobs:
           done
           ls -la dist
       - name: Upload zips as release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*.zip
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
