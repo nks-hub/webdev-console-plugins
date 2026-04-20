@@ -16,15 +16,53 @@ permissions:
 jobs:
   build-plugins:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '9.0.x'
-      - name: Restore
-        run: dotnet restore
+
+      # Same pattern as ci.yml: pull SDK + Core nupkg from the monorepo's
+      # most recent v* GitHub Release and use them as a local NuGet feed.
+      # Direct GH Packages restore across repos 403s on the default
+      # GITHUB_TOKEN scope, so the release flow mirrors CI here.
+      - name: Fetch SDK + Core nupkg from monorepo release
+        run: |
+          set -e
+          mkdir -p .local-nuget
+          latest_tag=$(gh release list --repo nks-hub/webdev-console --limit 50 \
+            --json tagName --jq '.[].tagName' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          echo "Using SDK nupkg from release ${latest_tag}"
+          gh release download "${latest_tag}" \
+            --repo nks-hub/webdev-console \
+            --pattern '*.nupkg' \
+            --dir .local-nuget
+          ls -la .local-nuget
+
+      - name: Rewrite nuget.config to point at local feed
+        run: |
+          cat > nuget.config <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+              <add key="local-sdk" value=".local-nuget" />
+            </packageSources>
+          </configuration>
+          EOF
+
       - name: Build all plugins (Release)
-        run: dotnet build -c Release --no-restore
+        run: |
+          set -e
+          for proj in NKS.WebDevConsole.Plugin.*/*.csproj; do
+            echo "::group::build $proj"
+            dotnet build "$proj" -c Release
+            echo "::endgroup::"
+          done
+
       - name: Package each plugin into its own zip
         shell: bash
         run: |
@@ -41,6 +79,7 @@ jobs:
             fi
           done
           ls -la dist
+
       - name: Upload zips as release assets
         uses: softprops/action-gh-release@v3
         with:
