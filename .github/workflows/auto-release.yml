@@ -33,6 +33,39 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
+      # Same cross-repo NuGet workaround as ci.yml / release.yml: pull
+      # SDK + Core nupkg from the monorepo's most recent v* release and
+      # point restore at a local feed. Without this, `dotnet restore`
+      # inside the per-plugin loop would hit nuget.pkg.github.com with a
+      # token that has no cross-repo packages:read scope → NU1101/403.
+      - name: Fetch SDK + Core nupkg from monorepo release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          mkdir -p .local-nuget
+          latest_tag=$(gh release list --repo nks-hub/webdev-console --limit 50 \
+            --json tagName --jq '.[].tagName' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          echo "Using SDK nupkg from release ${latest_tag}"
+          gh release download "${latest_tag}" \
+            --repo nks-hub/webdev-console \
+            --pattern '*.nupkg' \
+            --dir .local-nuget
+          ls -la .local-nuget
+
+      - name: Rewrite nuget.config to point at local feed
+        run: |
+          cat > nuget.config <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+              <add key="local-sdk" value=".local-nuget" />
+            </packageSources>
+          </configuration>
+          EOF
+
       - name: Detect changed plugins
         id: detect
         shell: bash
