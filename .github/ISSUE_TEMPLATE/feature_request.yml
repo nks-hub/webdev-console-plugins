@@ -1,0 +1,37 @@
+name: Feature request
+description: Propose a new plugin or a new capability for an existing plugin
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - New plugin
+        - New feature in an existing plugin
+        - Plugin API / SDK change
+    validations:
+      required: true
+  - type: input
+    id: plugin
+    attributes:
+      label: Plugin (if existing)
+      description: Leave blank for "New plugin" requests.
+      placeholder: nks.wdc.apache
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+      description: What workflow is impossible or awkward today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
