@@ -9,6 +9,10 @@ on:
 
 permissions:
   contents: read
+  # F99: build job needs to pull NKS.WebDevConsole.Plugin.SDK from the
+  # org-wide GitHub Packages feed. `packages: read` is not in the default
+  # GITHUB_TOKEN scope, which produced a 403 on dotnet restore.
+  packages: read
 
 jobs:
   # F100 landed: plugin csprojs now reference Plugin.SDK as a NuGet
