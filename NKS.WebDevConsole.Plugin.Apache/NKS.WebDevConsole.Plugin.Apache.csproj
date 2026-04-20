@@ -17,7 +17,4 @@
     <EmbeddedResource Include="Templates\httpd.conf.scriban" />
     <EmbeddedResource Include="Resources\icon.svg" />
   </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\..\daemon\NKS.WebDevConsole.Plugin.SDK\NKS.WebDevConsole.Plugin.SDK.csproj" />
-  </ItemGroup>
 </Project>

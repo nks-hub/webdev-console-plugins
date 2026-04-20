@@ -18,7 +18,4 @@
     <EmbeddedResource Include="Templates\php-shim.cmd.scriban" />
     <EmbeddedResource Include="Resources\icon.svg" />
   </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\..\daemon\NKS.WebDevConsole.Plugin.SDK\NKS.WebDevConsole.Plugin.SDK.csproj" />
-  </ItemGroup>
 </Project>

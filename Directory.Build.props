@@ -1,8 +1,19 @@
 <Project>
   <PropertyGroup>
-    <OutputPath>$(MSBuildThisFileDirectory)..\..\build\plugins\</OutputPath>
-    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <!-- Standalone repo output: write per-plugin artifacts next to their
+         own csproj (default net9.0 conv). When this folder is sideloaded
+         as a sibling of nks-ws, the monorepo's stage-plugins.mjs can still
+         copy from each plugin's bin/Release/net9.0. -->
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>true</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>
+
+  <!-- Every NKS plugin depends on the SDK (IWdcPlugin, IFrontendPanelProvider,
+       UiSchemaBuilder, …). Published from the nks-ws monorepo's publish-sdk.yml
+       workflow on each v* tag to nuget.pkg.github.com/nks-hub. -->
+  <ItemGroup>
+    <PackageReference Include="NKS.WebDevConsole.Plugin.SDK" Version="0.1.82" />
+  </ItemGroup>
 </Project>
