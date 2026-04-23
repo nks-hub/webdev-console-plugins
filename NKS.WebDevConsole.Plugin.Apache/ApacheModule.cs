@@ -141,6 +141,12 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         var mpmDynamic = File.Exists(
             Path.Combine(_config.ServerRoot, "modules", "mod_mpm_event.so"));
 
+        // mod_ssl.so availability. We LoadModule it whenever the build
+        // ships it (every modern httpd) so vhosts toggling SSLEngine at
+        // runtime don't require a full httpd.conf regeneration.
+        var sslAvailable = File.Exists(
+            Path.Combine(_config.ServerRoot, "modules", "mod_ssl.so"));
+
         var model = new
         {
             generated_at = DateTime.UtcNow.ToString("u"),
@@ -148,6 +154,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             http_port = _config.HttpPort,
             https_port = _config.HttpsPort,
             ssl_enabled = HasAnySslCerts(),
+            ssl_available = sslAvailable,
             php_enabled = true,
             is_windows = OperatingSystem.IsWindows(),
             mpm_dynamic = mpmDynamic,

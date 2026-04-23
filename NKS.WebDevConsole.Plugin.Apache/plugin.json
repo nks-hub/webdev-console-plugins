@@ -1,7 +1,7 @@
 {
   "id": "nks.wdc.apache",
   "displayName": "Apache HTTP Server",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Apache 2.4 service module \u2014 manages httpd lifecycle, virtual host generation, and config validation.",
   "author": "NKS",
   "license": "Apache-2.0",
