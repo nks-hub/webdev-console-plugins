@@ -13,7 +13,7 @@ public sealed class RedisPlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.redis";
     public string DisplayName => "Redis";
-    public string Version => "1.0.1";
+    public string Version => "1.0.5";
 
     private RedisModule? _module;
     private IDisposable? _binaryInstalledSub;

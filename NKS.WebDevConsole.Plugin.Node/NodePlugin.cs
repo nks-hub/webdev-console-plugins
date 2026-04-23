@@ -16,7 +16,7 @@ public sealed class NodePlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.node";
     public string DisplayName => "Node.js";
-    public string Version => "1.0.0";
+    public string Version => "1.0.2";
 
     private NodeModule? _module;
 

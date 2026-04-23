@@ -13,7 +13,7 @@ public sealed class SslPlugin : IWdcPlugin
 {
     public string Id => "nks.wdc.ssl";
     public string DisplayName => "SSL (mkcert)";
-    public string Version => "1.0.0";
+    public string Version => "1.0.2";
 
     private MkcertManager? _mkcert;
     private ILogger? _logger;

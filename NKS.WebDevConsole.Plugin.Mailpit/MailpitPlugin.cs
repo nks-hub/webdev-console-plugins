@@ -13,7 +13,7 @@ public sealed class MailpitPlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.mailpit";
     public string DisplayName => "Mailpit";
-    public string Version => "1.0.0";
+    public string Version => "1.0.2";
 
     private MailpitModule? _module;
 

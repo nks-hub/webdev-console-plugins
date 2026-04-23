@@ -14,7 +14,7 @@ public sealed class NginxPlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.nginx";
     public string DisplayName => "Nginx";
-    public string Version => "1.0.0";
+    public string Version => "1.0.2";
 
     private NginxModule? _module;
 

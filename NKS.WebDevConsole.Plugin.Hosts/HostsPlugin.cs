@@ -17,7 +17,7 @@ public sealed class HostsPlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.hosts";
     public string DisplayName => "Hosts Manager";
-    public string Version => "1.0.0";
+    public string Version => "1.0.2";
 
     public PluginUiDefinition GetUiDefinition() =>
         new UiSchemaBuilder(Id)

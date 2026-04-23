@@ -14,7 +14,7 @@ public sealed class MariaDBPlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.mariadb";
     public string DisplayName => "MariaDB";
-    public string Version => "1.0.1";
+    public string Version => "1.0.5";
 
     private MariaDBModule? _module;
     private IDisposable? _binaryInstalledSub;
