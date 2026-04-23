@@ -663,20 +663,25 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         if (!validation.IsValid)
             throw new InvalidOperationException($"Reload aborted — config invalid: {validation.ErrorMessage}");
 
-        if (OperatingSystem.IsWindows())
-        {
-            await Cli.Wrap(_config.ExecutablePath)
-                .WithArguments(["-k", "restart"])
-                .WithValidation(CommandResultValidation.None)
-                .ExecuteAsync(ct);
-        }
-        else
-        {
-            await Cli.Wrap(_config.ExecutablePath)
-                .WithArguments(["-k", "graceful"])
-                .WithValidation(CommandResultValidation.None)
-                .ExecuteAsync(ct);
-        }
+        // Pass -f + -d so reload addresses *our* httpd instance, not the
+        // baked-in default (CI runner path on nks-hub builds, /opt/homebrew
+        // on brew binaries). Without these, `httpd -k graceful` on macOS
+        // either fails silently or signals the wrong master process and
+        // our vhost changes never get picked up — users had to full-stop
+        // + start to see their new sites.
+        var configPath = ResolveConfigPath();
+        var signalArgs = OperatingSystem.IsWindows()
+            ? new List<string> { "-k", "restart" }
+            : new List<string> { "-k", "graceful" };
+        if (File.Exists(configPath))
+            signalArgs.AddRange(new[] { "-f", configPath });
+        if (!string.IsNullOrEmpty(_config.ServerRoot))
+            signalArgs.AddRange(new[] { "-d", _config.ServerRoot });
+
+        await Cli.Wrap(_config.ExecutablePath)
+            .WithArguments(signalArgs)
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteAsync(ct);
 
         _logger.LogInformation("Apache reloaded successfully");
     }
