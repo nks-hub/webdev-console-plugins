@@ -447,20 +447,12 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             _state = ServiceState.Starting;
         }
 
-        // If the daemon booted before the user installed Apache (wizard flow),
-        // InitializeAsync's early-return left ServerRoot blank and
-        // ExecutablePath at its default "httpd" — which resolves to brew's
-        // system httpd whose baked-in ServerRoot points at a path that
-        // doesn't match our managed tree. Re-run detection whenever
-        // ServerRoot isn't pointing at our BinariesRoot so a post-install
-        // Start picks up the freshly extracted binary and the generated
-        // httpd.conf under ~/.wdc/binaries/apache/<ver>/conf/.
-        var pointsAtManagedTree = !string.IsNullOrEmpty(_config.ServerRoot)
-            && _config.ServerRoot.StartsWith(_config.BinariesRoot, StringComparison.Ordinal);
-        if (!pointsAtManagedTree && Directory.Exists(_config.BinariesRoot))
-        {
-            await InitializeAsync(ct);
-        }
+        // Re-detection is driven by the BinaryInstalled event bus subscribed
+        // from ApachePlugin.StartAsync (task #9) — no more per-Start probing
+        // of BinariesRoot. If ExecutablePath is still blank here, either
+        // Apache isn't installed yet OR the install event hasn't fired yet,
+        // in which case the launch below will surface a clear error instead
+        // of silently picking up /usr/sbin/httpd.
 
         // Ensure any early throw (config validation, process.Start failure, port
         // bind timeout) leaves the state recoverable. Without this wrapper,
