@@ -11,9 +11,17 @@ public class HostsManager
 
     public HostsManager(string? hostsPath = null)
     {
-        _hostsPath = hostsPath ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.System),
-            "drivers", "etc", "hosts");
+        _hostsPath = hostsPath ?? DefaultHostsPath();
+    }
+
+    private static string DefaultHostsPath()
+    {
+        if (OperatingSystem.IsWindows())
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.System),
+                "drivers", "etc", "hosts");
+        // macOS and Linux both use /etc/hosts.
+        return "/etc/hosts";
     }
 
     public string HostsPath => _hostsPath;

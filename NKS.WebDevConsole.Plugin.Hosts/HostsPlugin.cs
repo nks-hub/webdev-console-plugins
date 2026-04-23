@@ -185,56 +185,96 @@ public sealed class HostsPlugin : IWdcPlugin, IFrontendPanelProvider
     private async Task<bool> TryWriteWithElevationAsync(string content)
     {
         if (_manager is null) return false;
+        var tmp = Path.Combine(Path.GetTempPath(), $"nks-wdc-hosts.{Guid.NewGuid():N}");
         try
         {
-            var tmp = Path.Combine(Path.GetTempPath(), $"nks-wdc-hosts.{Guid.NewGuid():N}");
             await File.WriteAllTextAsync(tmp, content);
-            try
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
             {
-                if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                // Build the AppleScript in managed code. `quoted form of` makes
+                // AppleScript itself shell-quote the tmp/dest paths so spaces,
+                // apostrophes, and special chars in Path.GetTempPath() cannot
+                // corrupt the /bin/cp invocation. We pass the script as a SINGLE
+                // -e argument via ArgumentList — no shell, no outer round of
+                // double-quote escaping.
+                var script =
+                    "do shell script \"/bin/cp \" & quoted form of \"" + EscapeForAppleScriptString(tmp) + "\" & \" \" & " +
+                    "quoted form of \"" + EscapeForAppleScriptString(_manager.HostsPath) + "\" " +
+                    "with prompt \"NKS WebDev Console needs permission to update " + EscapeForAppleScriptString(_manager.HostsPath) + ".\" " +
+                    "with administrator privileges";
+
+                var psi = new ProcessStartInfo
                 {
-                    var script = $"do shell script \"/bin/cp '{tmp}' '{_manager.HostsPath}'\" with prompt \"NKS WebDev Console needs permission to update /etc/hosts.\" with administrator privileges";
-                    var psi = new ProcessStartInfo("osascript", $"-e \"{script.Replace("\"", "\\\"")}\"")
-                    {
-                        UseShellExecute = false,
-                        RedirectStandardError = true,
-                        RedirectStandardOutput = true,
-                    };
-                    using var p = Process.Start(psi);
-                    if (p is null) return false;
-                    await p.WaitForExitAsync();
-                    if (p.ExitCode != 0)
-                    {
-                        _logger?.LogWarning("osascript elevation declined or failed: {Err}",
-                            (await p.StandardError.ReadToEndAsync()).Trim());
-                        return false;
-                    }
-                    return true;
-                }
-                if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                    FileName = "/usr/bin/osascript",
+                    UseShellExecute = false,
+                    RedirectStandardError = true,
+                    RedirectStandardOutput = true,
+                };
+                psi.ArgumentList.Add("-e");
+                psi.ArgumentList.Add(script);
+
+                _logger?.LogInformation("[hosts] requesting elevation prompt for {Path} write (tmp={Tmp})", _manager.HostsPath, tmp);
+                using var p = Process.Start(psi);
+                if (p is null) return false;
+                await p.WaitForExitAsync();
+                if (p.ExitCode != 0)
                 {
-                    // pkexec present on most desktop distros; falls back to a
-                    // clean error when run headlessly (no DISPLAY) — caller
-                    // then shows the dry-run warning.
-                    var psi = new ProcessStartInfo("pkexec", $"/bin/cp {tmp} {_manager.HostsPath}")
-                    {
-                        UseShellExecute = false,
-                        RedirectStandardError = true,
-                    };
-                    using var p = Process.Start(psi);
-                    if (p is null) return false;
-                    await p.WaitForExitAsync();
-                    return p.ExitCode == 0;
+                    var err = (await p.StandardError.ReadToEndAsync()).Trim();
+                    if (err.Contains("User canceled", StringComparison.OrdinalIgnoreCase)
+                        || err.Contains("(-128)", StringComparison.Ordinal))
+                        _logger?.LogWarning("[hosts] user cancelled elevation prompt");
+                    else
+                        _logger?.LogWarning("[hosts] osascript elevation failed (exit={Code}): {Err}", p.ExitCode, err);
+                    return false;
                 }
-                return false;
+                return true;
             }
-            finally { try { File.Delete(tmp); } catch { } }
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            {
+                // pkexec present on most desktop distros; falls back to a
+                // clean error when run headlessly (no DISPLAY) — caller
+                // then shows the dry-run warning.
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "pkexec",
+                    UseShellExecute = false,
+                    RedirectStandardError = true,
+                };
+                psi.ArgumentList.Add("/bin/cp");
+                psi.ArgumentList.Add(tmp);
+                psi.ArgumentList.Add(_manager.HostsPath);
+
+                _logger?.LogInformation("[hosts] requesting elevation prompt via pkexec for {Path} write", _manager.HostsPath);
+                using var p = Process.Start(psi);
+                if (p is null) return false;
+                await p.WaitForExitAsync();
+                if (p.ExitCode != 0)
+                {
+                    var err = (await p.StandardError.ReadToEndAsync()).Trim();
+                    _logger?.LogWarning("[hosts] pkexec elevation failed (exit={Code}): {Err}", p.ExitCode, err);
+                    return false;
+                }
+                return true;
+            }
+
+            return false;
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning("Hosts elevation helper failed: {Message}", ex.Message);
+            _logger?.LogWarning("[hosts] elevation helper failed: {Message}", ex.Message);
             return false;
+        }
+        finally
+        {
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* best effort */ }
         }
     }
 
+    private static string EscapeForAppleScriptString(string value)
+    {
+        // AppleScript strings use backslash escapes for " and \ only.
+        return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+    }
 }
