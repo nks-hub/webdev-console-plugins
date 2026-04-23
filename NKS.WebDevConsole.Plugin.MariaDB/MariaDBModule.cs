@@ -248,6 +248,15 @@ public sealed class MariaDBModule : IServiceModule, IAsyncDisposable
         {
             _logger.LogInformation("Starting MariaDB on port {Port}...", _config.Port);
 
+            // Lazy-init: daemon may have booted before the user installed
+            // MariaDB via the wizard, leaving _config.ExecutablePath null.
+            // Re-probe BinariesRoot now that ~/.wdc/binaries/mariadb is
+            // populated. Mirrors the Apache/MySQL/PHP/Redis pattern.
+            if (string.IsNullOrEmpty(_config.ExecutablePath) && Directory.Exists(_config.BinariesRoot))
+            {
+                await InitializeAsync(ct);
+            }
+
             // SPEC §9 Port Conflict Detection — raise a diagnostic error before
             // letting mariadbd fail with a cryptic bind() error.
             var conflict = PortConflictDetector.CheckPort(_config.Port);
