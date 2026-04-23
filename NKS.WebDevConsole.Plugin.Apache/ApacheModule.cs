@@ -279,8 +279,16 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
                 key_path = keyPath,
                 redirects = Array.Empty<object>(),
             },
-            port = site.HttpPort,
-            https_port = site.HttpsPort > 0 ? site.HttpsPort : 443,
+            // VirtualHost must bind to the port Apache is actually listening
+            // on. site.HttpPort is a legacy user-facing field defaulting to 80,
+            // but on macOS/Linux Apache's own HttpPort defaults to 8080 (no
+            // sudo). If the vhost emits <VirtualHost *:80> while Apache only
+            // listens on 8080, the vhost is silently ignored and every
+            // request hits the fallback "It works!" page. Always pin to the
+            // apache-side listen port so vhost + listen stay in sync.
+            port = _config.HttpPort > 0 ? _config.HttpPort : site.HttpPort,
+            https_port = _config.HttpsPort > 0 ? _config.HttpsPort
+                : (site.HttpsPort > 0 ? site.HttpsPort : 443),
             is_windows = OperatingSystem.IsWindows(),
             php_cgi_path = phpCgiPath,
         };
