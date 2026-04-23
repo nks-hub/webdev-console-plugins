@@ -97,10 +97,28 @@ public sealed class PhpPlugin : IWdcPlugin, IFrontendPanelProvider
 
     /// <summary>
     /// Returns a REST-friendly summary of all detected PHP installations.
+    /// Reads the live _module.Installations so versions installed AFTER
+    /// plugin startup (wizard flow, ~/.wdc/binaries/php populated post-boot)
+    /// show up without requiring a daemon restart. If the module's snapshot
+    /// is still empty but the AppDirectory now has content on disk,
+    /// trigger a synchronous re-init so the first call after wizard install
+    /// already sees the new binaries (blocking is acceptable here: the
+    /// endpoint is rate-limited by the UI and the scan is IO-bound).
     /// </summary>
     public IReadOnlyList<PhpVersionInfo> GetInstalledVersions()
     {
-        return _installations.Select(php => new PhpVersionInfo(
+        var live = _module?.Installations ?? _installations;
+        if (live.Count == 0 && _module is not null)
+        {
+            try
+            {
+                _module.InitializeAsync(System.Threading.CancellationToken.None)
+                    .GetAwaiter().GetResult();
+                live = _module.Installations;
+            }
+            catch { /* best-effort lazy init — fall through with empty list */ }
+        }
+        return live.Select(php => new PhpVersionInfo(
             php.Version,
             php.MajorMinor,
             php.ExecutablePath,
