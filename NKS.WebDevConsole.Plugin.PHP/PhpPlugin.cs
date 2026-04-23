@@ -17,11 +17,12 @@ public sealed class PhpPlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.php";
     public string DisplayName => "PHP (Multi-version)";
-    public string Version => "1.0.0";
+    public string Version => "1.0.1";
 
     private PhpModule? _module;
     private PhpVersionManager? _versionManager;
     private IReadOnlyList<PhpInstallation> _installations = [];
+    private IDisposable? _binaryInstalledSub;
 
     public void Initialize(IServiceCollection services, IPluginContext context)
     {
@@ -87,52 +88,47 @@ public sealed class PhpPlugin : IWdcPlugin, IFrontendPanelProvider
                 php.Extensions.Length,
                 php.FcgiPort);
         }
+
+        // BinaryInstalled subscription: every `POST /api/binaries/install
+        // {"app":"php","version":"X"}` (wizard or marketplace) re-runs
+        // DetectAllAsync so newly installed versions surface in
+        // /api/php/versions and — if PHP is Running — get an FPM worker on
+        // the next Start. Replaces the readdir-on-every-call lazy-init in
+        // GetInstalledVersions (task #9).
+        var bus = context.ServiceProvider.GetService(typeof(IBinaryInstalledEventBus))
+            as IBinaryInstalledEventBus;
+        _binaryInstalledSub = bus?.Subscribe(async evt =>
+        {
+            if (!string.Equals(evt.App, "php", StringComparison.OrdinalIgnoreCase)) return;
+            logger.LogInformation(
+                "BinaryInstalled php {Version} → re-initializing PHP module", evt.Version);
+            if (_module is not null)
+            {
+                await _module.InitializeAsync(CancellationToken.None);
+                _installations = _module.Installations;
+            }
+        });
     }
 
     public async Task StopAsync(CancellationToken ct)
     {
+        _binaryInstalledSub?.Dispose();
+        _binaryInstalledSub = null;
         if (_module is not null)
             await _module.StopAsync(ct);
     }
 
     /// <summary>
     /// Returns a REST-friendly summary of all detected PHP installations.
-    /// Reads the live _module.Installations so versions installed AFTER
-    /// plugin startup (wizard flow, ~/.wdc/binaries/php populated post-boot)
-    /// show up without requiring a daemon restart. If the module's snapshot
-    /// is still empty but the AppDirectory now has content on disk,
-    /// trigger a synchronous re-init so the first call after wizard install
-    /// already sees the new binaries (blocking is acceptable here: the
-    /// endpoint is rate-limited by the UI and the scan is IO-bound).
+    /// Reads <c>_module.Installations</c> directly so versions installed
+    /// AFTER plugin startup show up once the BinaryInstalled subscription
+    /// (wired in <see cref="StartAsync"/>) has re-run <c>InitializeAsync</c>.
+    /// No more readdir-on-every-call lazy-init here (task #9) — the event
+    /// bus is the single re-detection trigger.
     /// </summary>
     public IReadOnlyList<PhpVersionInfo> GetInstalledVersions()
     {
         var live = _module?.Installations ?? _installations;
-
-        // Rescan whenever the on-disk version count exceeds the cached
-        // set — happens every time a user installs a new version through
-        // the wizard or /api/binaries/install since no BinaryInstalled
-        // event currently wires the install step back into the plugin
-        // (see task #9). Count comparison is cheap (a single readdir)
-        // and gives /api/php/versions freshness without requiring a
-        // daemon restart.
-        if (_module is not null)
-        {
-            var phpRoot = Path.Combine(NKS.WebDevConsole.Core.Services.WdcPaths.BinariesRoot, "php");
-            var diskVerCount = Directory.Exists(phpRoot)
-                ? Directory.GetDirectories(phpRoot).Count(d => !Path.GetFileName(d).StartsWith('.'))
-                : 0;
-            if (live.Count < diskVerCount)
-            {
-                try
-                {
-                    _module.InitializeAsync(System.Threading.CancellationToken.None)
-                        .GetAwaiter().GetResult();
-                    live = _module.Installations;
-                }
-                catch { /* best-effort lazy init — fall through with stale cache */ }
-            }
-        }
         return live.Select(php => new PhpVersionInfo(
             php.Version,
             php.MajorMinor,

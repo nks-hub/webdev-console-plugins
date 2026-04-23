@@ -212,23 +212,11 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
     {
         lock (_stateLock) _state = ServiceState.Starting;
 
-        // Rescan ~/.wdc/binaries/php whenever on-disk has more versions
-        // than _installations currently tracks — covers both (a) first
-        // Start after the daemon booted pre-wizard, and (b) subsequent
-        // installs of additional PHP versions that happen while the
-        // service is already Running. Without this, FPM pools only
-        // spawn for versions present at the very first Start and later
-        // installs never get a worker, so vhosts targeting them return
-        // 503 Service Unavailable from mod_proxy_fcgi.
-        var phpRoot = Path.Combine(
-            NKS.WebDevConsole.Core.Services.WdcPaths.BinariesRoot, "php");
-        var diskCount = Directory.Exists(phpRoot)
-            ? Directory.GetDirectories(phpRoot).Count(d => !Path.GetFileName(d).StartsWith('.'))
-            : 0;
-        if (_installations.Count < diskCount)
-        {
-            await InitializeAsync(ct);
-        }
+        // Re-detection is driven by the BinaryInstalled event bus
+        // subscribed from PhpPlugin.StartAsync — each `POST /api/binaries/install
+        // {"app":"php","version":"X"}` triggers a fresh DetectAllAsync so
+        // a second install (e.g. user adds PHP 8.4 after 8.3) spawns its
+        // FPM pool on next Start. No more per-Start readdir probe (task #9).
 
         var tasks = _installations
             .Where(p => p.FpmExecutable is not null && !_running.ContainsKey(p.MajorMinor))
