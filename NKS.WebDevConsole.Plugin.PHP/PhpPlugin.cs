@@ -140,6 +140,7 @@ public sealed class PhpPlugin : IWdcPlugin, IFrontendPanelProvider
         new UiSchemaBuilder(Id)
             .Category("Runtimes")
             .Icon("el-icon-cpu")
+            .SetServiceCategory("lang", "php")
             .AddServiceCard("php")
             .AddVersionSwitcher("php")
             .AddConfigEditor("php")
