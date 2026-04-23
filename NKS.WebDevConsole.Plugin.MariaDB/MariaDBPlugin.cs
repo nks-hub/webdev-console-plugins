@@ -14,9 +14,10 @@ public sealed class MariaDBPlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.mariadb";
     public string DisplayName => "MariaDB";
-    public string Version => "1.0.0";
+    public string Version => "1.0.1";
 
     private MariaDBModule? _module;
+    private IDisposable? _binaryInstalledSub;
 
     public void Initialize(IServiceCollection services, IPluginContext context)
     {
@@ -33,9 +34,29 @@ public sealed class MariaDBPlugin : IWdcPlugin, IFrontendPanelProvider
 
         _module = context.ServiceProvider.GetRequiredService<MariaDBModule>();
         await _module.InitializeAsync(ct);
+
+        // BinaryInstalled subscription: a post-boot `POST /api/binaries/install
+        // {"app":"mariadb"}` re-runs detection so the next Start finds the
+        // freshly extracted mariadbd/mysqld. Replaces the Start-time
+        // lazy-init snippet (task #9).
+        var bus = context.ServiceProvider.GetService(typeof(IBinaryInstalledEventBus))
+            as IBinaryInstalledEventBus;
+        _binaryInstalledSub = bus?.Subscribe(async evt =>
+        {
+            if (!string.Equals(evt.App, "mariadb", StringComparison.OrdinalIgnoreCase)) return;
+            logger.LogInformation(
+                "BinaryInstalled mariadb {Version} → re-initializing MariaDB module", evt.Version);
+            if (_module is not null)
+                await _module.InitializeAsync(CancellationToken.None);
+        });
     }
 
-    public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
+    public Task StopAsync(CancellationToken ct)
+    {
+        _binaryInstalledSub?.Dispose();
+        _binaryInstalledSub = null;
+        return Task.CompletedTask;
+    }
 
     public PluginUiDefinition GetUiDefinition() =>
         new UiSchemaBuilder(Id)

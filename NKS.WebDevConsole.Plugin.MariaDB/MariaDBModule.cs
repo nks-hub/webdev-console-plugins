@@ -328,14 +328,11 @@ socket={dataDir}/mariadb.sock
         {
             _logger.LogInformation("Starting MariaDB on port {Port}...", _config.Port);
 
-            // Lazy-init: daemon may have booted before the user installed
-            // MariaDB via the wizard, leaving _config.ExecutablePath null.
-            // Re-probe BinariesRoot now that ~/.wdc/binaries/mariadb is
-            // populated. Mirrors the Apache/MySQL/PHP/Redis pattern.
-            if (string.IsNullOrEmpty(_config.ExecutablePath) && Directory.Exists(_config.BinariesRoot))
-            {
-                await InitializeAsync(ct);
-            }
+            // Re-detection is driven by the BinaryInstalled event bus
+            // subscribed from MariaDBPlugin.StartAsync (task #9) — no more
+            // per-Start BinariesRoot probe. If ExecutablePath is still
+            // blank, ResolveDaemonExecutable() below will throw a clear
+            // "not found" error.
 
             // SPEC §9 Port Conflict Detection — raise a diagnostic error before
             // letting mariadbd fail with a cryptic bind() error.
