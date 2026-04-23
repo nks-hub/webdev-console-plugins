@@ -175,13 +175,21 @@ public sealed class PhpVersionManager
             return File.Exists(cgi) ? cgi : null;
         }
 
+        // Our source builds install PHP under <prefix>/bin/php and
+        // php-fpm under <prefix>/sbin/php-fpm (FHS convention). phpDir
+        // here is the detected `bin` dir, so sbin lives as a sibling,
+        // not a child. First-path variant matched legacy Windows-style
+        // flat extracts where php-fpm sits next to php; second/third
+        // variants cover ../sbin and ./sbin layouts.
+        var parentDir = Path.GetDirectoryName(phpDir.TrimEnd(Path.DirectorySeparatorChar));
         foreach (var candidate in new[]
         {
             Path.Combine(phpDir, "php-fpm"),
             Path.Combine(phpDir, "sbin", "php-fpm"),
+            parentDir is null ? "" : Path.Combine(parentDir, "sbin", "php-fpm"),
         })
         {
-            if (File.Exists(candidate))
+            if (!string.IsNullOrEmpty(candidate) && File.Exists(candidate))
                 return candidate;
         }
         return null;
