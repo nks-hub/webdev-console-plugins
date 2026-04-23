@@ -115,8 +115,16 @@ public sealed class PhpVersionManager
     {
         try
         {
+            // -n suppresses php.ini loading — our PhpIniManager may have
+            // written a conf that references missing .so files (e.g.
+            // opcache when the binary links it statically), which PHP
+            // reports as a startup warning printed to STDOUT under
+            // display_startup_errors=On. That warning gets concatenated
+            // with the PHP_VERSION echo, breaking IsValidPhpVersion and
+            // causing the whole probe to return null even though the
+            // binary is perfectly functional. -n gives us a clean echo.
             var result = await Cli.Wrap(phpPath)
-                .WithArguments(["-r", "echo PHP_VERSION;"])
+                .WithArguments(["-n", "-r", "echo PHP_VERSION;"])
                 .WithValidation(CommandResultValidation.None)
                 .ExecuteBufferedAsync(ct);
 

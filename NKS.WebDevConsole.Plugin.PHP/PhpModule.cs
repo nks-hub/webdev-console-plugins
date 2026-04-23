@@ -71,6 +71,36 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
     private const int SIGQUIT = 3;
     private const int SIGTERM = 15;
 
+    /// <summary>
+    /// Invoke php-config --extension-dir (ships next to every real PHP
+    /// install) to get the true, ABI-tagged module directory. Falls back
+    /// to null when php-config is missing or doesn't exit cleanly — the
+    /// caller layers its own last-ditch default on top.
+    /// </summary>
+    private static string? ResolveExtensionDir(string phpBinDir)
+    {
+        var phpConfigName = OperatingSystem.IsWindows() ? "php-config.bat" : "php-config";
+        var phpConfig = Path.Combine(phpBinDir, phpConfigName);
+        if (!File.Exists(phpConfig)) return null;
+        try
+        {
+            var psi = new ProcessStartInfo(phpConfig, "--extension-dir")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            using var p = Process.Start(psi);
+            if (p is null) return null;
+            var outp = p.StandardOutput.ReadToEnd().Trim();
+            p.WaitForExit(3000);
+            if (p.ExitCode != 0 || string.IsNullOrEmpty(outp)) return null;
+            return Directory.Exists(outp) ? outp : null;
+        }
+        catch { return null; }
+    }
+
     public PhpModule(
         PhpVersionManager versionManager,
         PhpIniManager iniManager,
@@ -100,11 +130,24 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
         {
             var defaultExts = _extensionManager.GetDefaultEnabledExtensions(php);
 
+            // Resolve extension_dir via `php-config --extension-dir` so
+            // source builds (where exts live under
+            // <prefix>/lib/php/extensions/no-debug-non-zts-<abi>/) and
+            // Windows flat extracts (where exts live next to php.exe in
+            // <prefix>/ext) both work. The old hardcoded
+            // <binDir>/ext path was a macOS-specific guess that ended up
+            // wrong on every layout — PHP then warned about every
+            // .so-less extension in php.ini at startup on stdout,
+            // breaking our version probe among other things.
+            var phpBinDir = Path.GetDirectoryName(php.ExecutablePath)!;
+            var extDir = ResolveExtensionDir(phpBinDir)
+                ?? Path.Combine(phpBinDir, "ext"); // last-ditch fallback
+
             var opts = new PhpIniOptions(
                 Version: php.Version,
                 Profile: PhpIniProfile.Development,
                 Mode: PhpIniMode.Web,
-                ExtDir: Path.Combine(Path.GetDirectoryName(php.ExecutablePath)!, "ext"),
+                ExtDir: extDir,
                 ErrorLog: Path.Combine(_config.LogDirectory, $"php{php.MajorMinor}-errors.log"),
                 TmpDir: Path.GetTempPath(),
                 Extensions: defaultExts
