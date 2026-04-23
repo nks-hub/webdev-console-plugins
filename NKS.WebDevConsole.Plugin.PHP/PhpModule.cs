@@ -367,6 +367,46 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
             return;
         }
 
+        // Kill any orphan php-fpm master squatting our FastCGI port. Happens
+        // when a previous daemon/app session was force-killed: the FPM master
+        // survived, kept 127.0.0.1:9085 bound, and the fresh master fails
+        // with "Address already in use (48)" → state flips to Crashed and
+        // nothing runs until the user manually `pkill php-fpm`. Use lsof
+        // to find the squatter; guarded try/catch so Windows (no lsof) and
+        // missing-binary scenarios silently skip.
+        if (!OperatingSystem.IsWindows() && php.FcgiPort > 0)
+        {
+            try
+            {
+                var lsofResult = await Cli.Wrap("/usr/sbin/lsof")
+                    .WithArguments(new[] { "-tiTCP:" + php.FcgiPort, "-sTCP:LISTEN" })
+                    .WithValidation(CommandResultValidation.None)
+                    .ExecuteBufferedAsync(ct);
+                var pids = lsofResult.StandardOutput
+                    .Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Where(s => int.TryParse(s.Trim(), out _))
+                    .Select(int.Parse)
+                    .Where(p => p != Environment.ProcessId)
+                    .ToList();
+                foreach (var pid in pids)
+                {
+                    _logger.LogWarning(
+                        "Found orphan process PID={Pid} holding PHP {Version} FastCGI port {Port} — killing before starting our own",
+                        pid, php.MajorMinor, php.FcgiPort);
+                    try { Process.GetProcessById(pid).Kill(entireProcessTree: true); }
+                    catch (Exception killEx)
+                    {
+                        _logger.LogDebug(killEx, "Could not kill orphan pid {Pid}", pid);
+                    }
+                }
+                if (pids.Count > 0) await Task.Delay(500, ct); // give OS time to release the port
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Port probe via lsof failed, proceeding anyway");
+            }
+        }
+
         _logger.LogInformation("Starting PHP {Version} on port {Port}...", php.Version, php.FcgiPort);
 
         Process process;
