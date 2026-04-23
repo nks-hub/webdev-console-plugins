@@ -43,6 +43,27 @@ public class MkcertManager
                     _logger.LogInformation("Found mkcert at {Path}", candidate);
                     return true;
                 }
+                // FiloSottile/mkcert releases publish assets with the
+                // platform suffix baked in (mkcert-v1.4.4-darwin-arm64,
+                // mkcert-v1.4.4-windows-amd64.exe); the BinaryDownloader
+                // extracts them verbatim without renaming to a stable
+                // "mkcert" symlink. Match the canonical "mkcert-v*"
+                // prefix so detection works straight out of the wizard
+                // without an extra symlink step.
+                var match = Directory.EnumerateFiles(vdir, "mkcert-v*")
+                    .FirstOrDefault(f =>
+                    {
+                        var name = Path.GetFileName(f);
+                        return OperatingSystem.IsWindows()
+                            ? name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                            : !name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase);
+                    });
+                if (match is not null)
+                {
+                    _mkcertPath = match;
+                    _logger.LogInformation("Found mkcert at {Path}", match);
+                    return true;
+                }
             }
         }
 

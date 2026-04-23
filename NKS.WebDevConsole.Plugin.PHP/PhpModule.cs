@@ -212,20 +212,26 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
     {
         lock (_stateLock) _state = ServiceState.Starting;
 
-        // Daemon booted before the user installed PHP via the wizard, so
-        // InitializeAsync's initial DetectAllAsync returned an empty list
-        // and _installations has been stale since. Re-scan AppDirectory
-        // (~/.wdc/binaries/php) when no installations are tracked yet so
-        // the first post-install Start picks up the newly extracted
-        // binary and writes its php.ini. Mirrors the ApacheModule +
-        // MySqlModule lazy-init pattern.
-        if (_installations.Count == 0 && Directory.Exists(_config.AppDirectory))
+        // Rescan ~/.wdc/binaries/php whenever on-disk has more versions
+        // than _installations currently tracks — covers both (a) first
+        // Start after the daemon booted pre-wizard, and (b) subsequent
+        // installs of additional PHP versions that happen while the
+        // service is already Running. Without this, FPM pools only
+        // spawn for versions present at the very first Start and later
+        // installs never get a worker, so vhosts targeting them return
+        // 503 Service Unavailable from mod_proxy_fcgi.
+        var phpRoot = Path.Combine(
+            NKS.WebDevConsole.Core.Services.WdcPaths.BinariesRoot, "php");
+        var diskCount = Directory.Exists(phpRoot)
+            ? Directory.GetDirectories(phpRoot).Count(d => !Path.GetFileName(d).StartsWith('.'))
+            : 0;
+        if (_installations.Count < diskCount)
         {
             await InitializeAsync(ct);
         }
 
         var tasks = _installations
-            .Where(p => p.FpmExecutable is not null)
+            .Where(p => p.FpmExecutable is not null && !_running.ContainsKey(p.MajorMinor))
             .Select(p => StartVersionAsync(p, ct));
 
         await Task.WhenAll(tasks);
