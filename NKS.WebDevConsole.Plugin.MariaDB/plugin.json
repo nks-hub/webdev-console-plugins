@@ -1,7 +1,7 @@
 {
   "id": "nks.wdc.mariadb",
   "displayName": "MariaDB",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "MariaDB service module \u2014 drop-in MySQL-compatible RDBMS, manages mariadbd lifecycle, datadir init via mariadb-install-db, my.cnf templates, DPAPI-protected root password.",
   "author": "NKS",
   "license": "Apache-2.0",

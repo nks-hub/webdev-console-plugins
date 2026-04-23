@@ -539,7 +539,33 @@ socket={dataDir}/mariadb.sock
     {
         ServiceState state;
         int? pid;
-        lock (_stateLock) { state = _state; pid = _process?.Id; }
+        lock (_stateLock)
+        {
+            // Reconcile against reality: if we think we're Running but our
+            // tracked Process has exited (user ran `pkill -f mariadbd`, OS
+            // OOM, crash that Process.Exited didn't reliably surface…), flip
+            // state to Crashed so the UI stops showing a stale pid/uptime.
+            // The clean StopAsync path sets _state=Stopped before disposal
+            // so it never trips this branch.
+            if (_state is ServiceState.Running or ServiceState.Starting
+                && _process is not null)
+            {
+                bool exited;
+                try { exited = _process.HasExited; }
+                catch (InvalidOperationException) { exited = true; }  // disposed / never started
+                if (exited)
+                {
+                    _logger.LogWarning(
+                        "Detected external process exit; state {Old} → Crashed (was pid {Pid})",
+                        _state, _process.Id);
+                    _state = ServiceState.Crashed;
+                    _startTime = null;
+                    _process = null;
+                }
+            }
+            state = _state;
+            pid = _process?.Id;
+        }
 
         var (cpu, memory) = ProcessMetricsSampler.Sample(_process);
         var uptime = _startTime.HasValue ? DateTime.UtcNow - _startTime.Value : TimeSpan.Zero;

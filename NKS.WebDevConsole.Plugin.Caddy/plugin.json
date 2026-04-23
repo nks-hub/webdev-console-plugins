@@ -1,7 +1,7 @@
 {
   "id": "nks.wdc.caddy",
   "displayName": "Caddy",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Caddy web server service module — alternative to Apache with automatic HTTPS. Manages caddy lifecycle and Caddyfile generation.",
   "author": "NKS",
   "license": "Apache-2.0",

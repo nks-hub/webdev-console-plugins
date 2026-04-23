@@ -280,6 +280,44 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
 
     public Task<ServiceStatus> GetStatusAsync(CancellationToken ct)
     {
+        // Reconcile against reality per-entry: the process.Exited handler
+        // installed in StartVersionAsync removes dead entries normally, but
+        // when the OS OR the user externally kills an FPM/php-cgi master
+        // (e.g. `pkill -f php-fpm`, OOM) that event can fire unreliably.
+        // Walk the dictionary on every status poll, drop any entry whose
+        // Process.HasExited is true, then recompute aggregate state:
+        //   - Running: at least one live FPM/CGI
+        //   - Crashed: all tracked entries died (was non-empty)
+        //   - Stopped: dict started empty or a Stopping/Stopped transition
+        //     already happened through StopAsync.
+        foreach (var (version, rp) in _running.ToArray())
+        {
+            bool exited;
+            try { exited = rp.Process.HasExited; }
+            catch (InvalidOperationException) { exited = true; }  // disposed
+            if (exited)
+            {
+                if (_running.TryRemove(version, out var removed))
+                {
+                    _logger.LogWarning(
+                        "Detected external PHP {Version} exit; removing stale entry (was pid {Pid})",
+                        version, removed.Process.Id);
+                    try { removed.Process.Dispose(); } catch { /* best-effort */ }
+                }
+            }
+        }
+
+        lock (_stateLock)
+        {
+            // Only reconcile the aggregate when we believed we were healthy.
+            // StopAsync deliberately transitions Stopping → Stopped and must
+            // not be overridden to Crashed by an empty dict here.
+            if (_state is ServiceState.Running or ServiceState.Starting)
+            {
+                _state = _running.IsEmpty ? ServiceState.Crashed : ServiceState.Running;
+            }
+        }
+
         int? firstPid = _running.IsEmpty ? null : _running.Values.First().Process.Id;
         var (totalCpu, totalMemory) = NKS.WebDevConsole.Core.Services.ProcessMetricsSampler.SampleMany(
             _running.Values.Select(rp => rp.Process));
