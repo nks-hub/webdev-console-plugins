@@ -27,11 +27,15 @@ public sealed class ApacheConfig
     // when the repo src dir was the cwd.
     public string VhostsDirectory { get; set; } = Path.Combine(WdcPaths.GeneratedRoot, "apache", "sites-enabled");
     public string LogDirectory { get; set; } = Path.Combine(WdcPaths.LogsRoot, "apache");
-    // Default to privileged ports (80/443) on Windows where the service runs
-    // as admin; on macOS/Linux fall back to 8080/8443 so the daemon can bind
-    // without sudo. Users with privileged-port plans override via settings.
-    public int HttpPort { get; set; } = OperatingSystem.IsWindows() ? 80 : 8080;
-    public int HttpsPort { get; set; } = OperatingSystem.IsWindows() ? 443 : 8443;
+    // Default to privileged ports (80/443) on every OS to match user
+    // expectations — http://localhost/ without a port suffix is what
+    // people type. On macOS/Linux binding <1024 needs sudo; when the
+    // daemon is running unelevated the Start will surface a clear
+    // "Permission denied" error and the user can override the port in
+    // Settings → Apache. Previous default of 8080/8443 on non-Windows
+    // worked silently but broke every bare-hostname link in browsers.
+    public int HttpPort { get; set; } = 80;
+    public int HttpsPort { get; set; } = 443;
     public int GracefulTimeoutSecs { get; set; } = 30;
 }
 
