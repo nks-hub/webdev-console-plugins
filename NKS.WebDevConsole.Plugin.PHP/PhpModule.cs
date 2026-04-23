@@ -169,6 +169,18 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
     {
         lock (_stateLock) _state = ServiceState.Starting;
 
+        // Daemon booted before the user installed PHP via the wizard, so
+        // InitializeAsync's initial DetectAllAsync returned an empty list
+        // and _installations has been stale since. Re-scan AppDirectory
+        // (~/.wdc/binaries/php) when no installations are tracked yet so
+        // the first post-install Start picks up the newly extracted
+        // binary and writes its php.ini. Mirrors the ApacheModule +
+        // MySqlModule lazy-init pattern.
+        if (_installations.Count == 0 && Directory.Exists(_config.AppDirectory))
+        {
+            await InitializeAsync(ct);
+        }
+
         var tasks = _installations
             .Where(p => p.FpmExecutable is not null)
             .Select(p => StartVersionAsync(p, ct));
