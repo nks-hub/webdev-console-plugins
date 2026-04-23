@@ -4,11 +4,14 @@ ServerRoot "{{ server_root | string.replace '\\' '/' }}"
 Listen {{ http_port }}
 {{ if ssl_enabled }}Listen {{ https_port }}{{ end }}
 
-# MPM — on Windows Apache Lounge, mpm_winnt is statically compiled into httpd.exe
-{{ if is_windows }}
-# (mpm_winnt is built-in, no LoadModule needed)
-{{ else }}
+# MPM — on Windows Apache Lounge mpm_winnt is statically compiled into
+# httpd.exe; the nks-hub source-built macos-arm64 binary also links MPM
+# statically (no mod_mpm_*.so in modules/). Emit LoadModule only when
+# we've actually seen the dynamic module on disk.
+{{ if mpm_dynamic }}
 LoadModule mpm_event_module modules/mod_mpm_event.so
+{{ else }}
+# (MPM is statically compiled into the httpd binary, no LoadModule needed)
 {{ end }}
 
 # Core modules

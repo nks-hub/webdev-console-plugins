@@ -130,6 +130,13 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         var templateContent = await LoadEmbeddedTemplateAsync("httpd.conf.scriban");
         var template = Scriban.Template.Parse(templateContent);
 
+        // Whether the httpd build carries MPM as a loadable .so. Windows
+        // Apache Lounge bakes it in; the nks-hub source-built macos-arm64
+        // binary also links statically. Detect by probing the modules dir
+        // — absent file means "static MPM, don't emit LoadModule".
+        var mpmDynamic = File.Exists(
+            Path.Combine(_config.ServerRoot, "modules", "mod_mpm_event.so"));
+
         var model = new
         {
             generated_at = DateTime.UtcNow.ToString("u"),
@@ -139,6 +146,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             ssl_enabled = HasAnySslCerts(),
             php_enabled = true,
             is_windows = OperatingSystem.IsWindows(),
+            mpm_dynamic = mpmDynamic,
             server_admin = "admin@localhost",
             server_name = "localhost:80",
             log_dir = _config.LogDirectory,
@@ -385,8 +393,14 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         var configPath = ResolveConfigPath();
         _logger.LogInformation("Validating Apache config: {Path}", configPath);
 
+        // -d pins ServerRoot to our managed tree; without it, httpd's baked
+        // HTTPD_ROOT (CI runner path or /opt/homebrew) wins and relative
+        // includes in the generated conf fail to resolve.
+        var args = !string.IsNullOrEmpty(_config.ServerRoot)
+            ? new[] { "-t", "-f", configPath, "-d", _config.ServerRoot }
+            : new[] { "-t", "-f", configPath };
         var result = await Cli.Wrap(_config.ExecutablePath)
-            .WithArguments(["-t", "-f", configPath])
+            .WithArguments(args)
             .WithValidation(CommandResultValidation.None)
             .ExecuteBufferedAsync(ct);
 
@@ -412,6 +426,21 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             if (_state is ServiceState.Running or ServiceState.Starting)
                 throw new InvalidOperationException($"Apache is already {_state}.");
             _state = ServiceState.Starting;
+        }
+
+        // If the daemon booted before the user installed Apache (wizard flow),
+        // InitializeAsync's early-return left ServerRoot blank and
+        // ExecutablePath at its default "httpd" — which resolves to brew's
+        // system httpd whose baked-in ServerRoot points at a path that
+        // doesn't match our managed tree. Re-run detection whenever
+        // ServerRoot isn't pointing at our BinariesRoot so a post-install
+        // Start picks up the freshly extracted binary and the generated
+        // httpd.conf under ~/.wdc/binaries/apache/<ver>/conf/.
+        var pointsAtManagedTree = !string.IsNullOrEmpty(_config.ServerRoot)
+            && _config.ServerRoot.StartsWith(_config.BinariesRoot, StringComparison.Ordinal);
+        if (!pointsAtManagedTree && Directory.Exists(_config.BinariesRoot))
+        {
+            await InitializeAsync(ct);
         }
 
         // Ensure any early throw (config validation, process.Start failure, port
@@ -764,10 +793,18 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
     private ProcessStartInfo BuildStartInfo()
     {
         var configPath = ResolveConfigPath();
+        // Pass ServerRoot via -d so httpd ignores the binary's baked-in
+        // HTTPD_ROOT (which points at the CI runner's extraction dir for
+        // nks-hub source builds, or /opt/homebrew/Cellar/... for brew).
+        // Without -d, includes and module paths in httpd.conf are resolved
+        // against the baked HTTPD_ROOT and all blow up on the user's disk.
+        var rootArg = !string.IsNullOrEmpty(_config.ServerRoot)
+            ? $" -d \"{_config.ServerRoot}\""
+            : string.Empty;
         var psi = new ProcessStartInfo
         {
             FileName = _config.ExecutablePath,
-            Arguments = $"-f \"{configPath}\" -D FOREGROUND",
+            Arguments = $"-f \"{configPath}\"{rootArg} -D FOREGROUND",
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -806,7 +843,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         return Path.Combine(_config.ServerRoot, _config.ConfigFile);
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         StopLogFileWatchers();
 
@@ -818,6 +855,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
 
         _process?.Dispose();
         _watcherCts?.Dispose();
+        return ValueTask.CompletedTask;
     }
 }
 
