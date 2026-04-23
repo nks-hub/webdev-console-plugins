@@ -108,15 +108,30 @@ public sealed class PhpPlugin : IWdcPlugin, IFrontendPanelProvider
     public IReadOnlyList<PhpVersionInfo> GetInstalledVersions()
     {
         var live = _module?.Installations ?? _installations;
-        if (live.Count == 0 && _module is not null)
+
+        // Rescan whenever the on-disk version count exceeds the cached
+        // set — happens every time a user installs a new version through
+        // the wizard or /api/binaries/install since no BinaryInstalled
+        // event currently wires the install step back into the plugin
+        // (see task #9). Count comparison is cheap (a single readdir)
+        // and gives /api/php/versions freshness without requiring a
+        // daemon restart.
+        if (_module is not null)
         {
-            try
+            var phpRoot = Path.Combine(NKS.WebDevConsole.Core.Services.WdcPaths.BinariesRoot, "php");
+            var diskVerCount = Directory.Exists(phpRoot)
+                ? Directory.GetDirectories(phpRoot).Count(d => !Path.GetFileName(d).StartsWith('.'))
+                : 0;
+            if (live.Count < diskVerCount)
             {
-                _module.InitializeAsync(System.Threading.CancellationToken.None)
-                    .GetAwaiter().GetResult();
-                live = _module.Installations;
+                try
+                {
+                    _module.InitializeAsync(System.Threading.CancellationToken.None)
+                        .GetAwaiter().GetResult();
+                    live = _module.Installations;
+                }
+                catch { /* best-effort lazy init — fall through with stale cache */ }
             }
-            catch { /* best-effort lazy init — fall through with empty list */ }
         }
         return live.Select(php => new PhpVersionInfo(
             php.Version,
