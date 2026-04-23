@@ -651,6 +651,13 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
     {
         _logger.LogInformation("Graceful reload of Apache...");
 
+        // Regenerate httpd.conf so a newly-added SSL cert picks up `Listen 443`.
+        // HasAnySslCerts() runs at template time; without this, httpd started
+        // before any site had a cert keeps Listen 80 only, and the vhost's
+        // <VirtualHost *:443> is orphaned — clients get "connection refused"
+        // on HTTPS even though cert.pem + vhost exist. Cheap to re-render.
+        await GenerateMainConfigAsync(ct);
+
         var validation = await ValidateConfigAsync(ct);
         if (!validation.IsValid)
             throw new InvalidOperationException($"Reload aborted — config invalid: {validation.ErrorMessage}");
