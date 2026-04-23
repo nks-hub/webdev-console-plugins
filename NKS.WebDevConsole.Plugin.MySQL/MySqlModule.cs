@@ -265,14 +265,11 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
         // CaddyModule/ApacheModule in this commit.
         try
         {
-            // Daemon booted before the user's wizard install, so InitializeAsync's
-            // binary probe returned false and ExecutablePath is null. Retry
-            // detection at Start-time now that ~/.wdc/binaries/mysql has been
-            // populated — mirrors the ApacheModule lazy-init fix.
-            if (string.IsNullOrEmpty(_config.ExecutablePath) && Directory.Exists(_config.BinariesRoot))
-            {
-                await InitializeAsync(ct);
-            }
+            // Re-detection is driven by the BinaryInstalled event bus
+            // subscribed from MySqlPlugin.StartAsync (task #9). If
+            // ExecutablePath is still blank here, the binary genuinely
+            // isn't installed — fail fast instead of probing BinariesRoot
+            // on every Start.
             if (string.IsNullOrEmpty(_config.ExecutablePath))
                 throw new InvalidOperationException("MySQL executable not found.");
 

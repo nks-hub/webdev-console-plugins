@@ -13,9 +13,10 @@ public sealed class MySqlPlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.mysql";
     public string DisplayName => "MySQL";
-    public string Version => "1.0.0";
+    public string Version => "1.0.1";
 
     private MySqlModule? _module;
+    private IDisposable? _binaryInstalledSub;
 
     public void Initialize(IServiceCollection services, IPluginContext context)
     {
@@ -30,10 +31,26 @@ public sealed class MySqlPlugin : IWdcPlugin, IFrontendPanelProvider
 
         _module = context.ServiceProvider.GetRequiredService<MySqlModule>();
         await _module.InitializeAsync(ct);
+
+        // BinaryInstalled subscription replaces the Start-time lazy-init
+        // probe (task #9). Post-wizard installs of mysql trigger a
+        // re-detection pass so the next Start sees ExecutablePath.
+        var bus = context.ServiceProvider.GetService(typeof(IBinaryInstalledEventBus))
+            as IBinaryInstalledEventBus;
+        _binaryInstalledSub = bus?.Subscribe(async evt =>
+        {
+            if (!string.Equals(evt.App, "mysql", StringComparison.OrdinalIgnoreCase)) return;
+            logger.LogInformation(
+                "BinaryInstalled mysql {Version} → re-initializing MySQL module", evt.Version);
+            if (_module is not null)
+                await _module.InitializeAsync(CancellationToken.None);
+        });
     }
 
     public async Task StopAsync(CancellationToken ct)
     {
+        _binaryInstalledSub?.Dispose();
+        _binaryInstalledSub = null;
         if (_module is not null)
             await _module.StopAsync(ct);
     }
