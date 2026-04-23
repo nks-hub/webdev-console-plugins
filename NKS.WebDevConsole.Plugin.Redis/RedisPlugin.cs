@@ -13,9 +13,10 @@ public sealed class RedisPlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.redis";
     public string DisplayName => "Redis";
-    public string Version => "1.0.0";
+    public string Version => "1.0.1";
 
     private RedisModule? _module;
+    private IDisposable? _binaryInstalledSub;
 
     public void Initialize(IServiceCollection services, IPluginContext context)
     {
@@ -30,10 +31,27 @@ public sealed class RedisPlugin : IWdcPlugin, IFrontendPanelProvider
 
         _module = context.ServiceProvider.GetRequiredService<RedisModule>();
         await _module.InitializeAsync(ct);
+
+        // BinaryInstalled subscription: a post-boot `POST /api/binaries/install
+        // {"app":"redis"}` re-runs detection so the next Start sees the
+        // freshly extracted redis-server. Replaces the Start-time lazy
+        // DetectRedisExecutable() call (task #9).
+        var bus = context.ServiceProvider.GetService(typeof(IBinaryInstalledEventBus))
+            as IBinaryInstalledEventBus;
+        _binaryInstalledSub = bus?.Subscribe(async evt =>
+        {
+            if (!string.Equals(evt.App, "redis", StringComparison.OrdinalIgnoreCase)) return;
+            logger.LogInformation(
+                "BinaryInstalled redis {Version} → re-initializing Redis module", evt.Version);
+            if (_module is not null)
+                await _module.InitializeAsync(CancellationToken.None);
+        });
     }
 
     public async Task StopAsync(CancellationToken ct)
     {
+        _binaryInstalledSub?.Dispose();
+        _binaryInstalledSub = null;
         if (_module is not null)
             await _module.StopAsync(ct);
     }

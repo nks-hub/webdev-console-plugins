@@ -136,14 +136,10 @@ public sealed class RedisModule : IServiceModule, IAsyncDisposable
         // doesn't get stuck in Starting. Same class of fix as Caddy/Apache/MySQL.
         try
         {
-            // Lazy-init detection for the wizard flow: daemon may have
-            // booted before the user installed redis, so InitializeAsync
-            // returned empty. Re-probe now that ~/.wdc/binaries/redis is
-            // populated. Matches the Apache/MySQL/PHP pattern.
-            if (string.IsNullOrEmpty(_config.ExecutablePath))
-            {
-                DetectRedisExecutable();
-            }
+            // Re-detection is driven by the BinaryInstalled event bus
+            // subscribed from RedisPlugin.StartAsync (task #9). If
+            // ExecutablePath is still blank here the binary genuinely
+            // isn't installed — fail fast.
             if (string.IsNullOrEmpty(_config.ExecutablePath))
                 throw new InvalidOperationException("redis-server executable not found.");
 
