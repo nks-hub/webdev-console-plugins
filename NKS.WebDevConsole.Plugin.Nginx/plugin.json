@@ -1,7 +1,7 @@
 {
   "id": "nks.wdc.nginx",
   "displayName": "Nginx",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Nginx service module — manages nginx lifecycle, server-block generation, and config validation.",
   "author": "NKS",
   "license": "Apache-2.0",

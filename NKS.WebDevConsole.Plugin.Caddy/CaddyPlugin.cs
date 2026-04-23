@@ -45,6 +45,7 @@ public sealed class CaddyPlugin : IWdcPlugin, IFrontendPanelProvider
         new UiSchemaBuilder(Id)
             .Category("Web Servers")
             .Icon("el-icon-connection")
+            .SetServiceCategory("web", "caddy")
             .AddServiceCard("caddy")
             .AddConfigEditor("caddy")
             .AddLogViewer("caddy")

@@ -45,6 +45,7 @@ public sealed class NodePlugin : IWdcPlugin, IFrontendPanelProvider
         new UiSchemaBuilder(Id)
             .Category("Tools")
             .Icon("el-icon-monitor")
+            .SetServiceCategory("lang", "node")
             .AddServiceCard("node")
             .AddLogViewer("node")
             .AddMetricsChart("node")

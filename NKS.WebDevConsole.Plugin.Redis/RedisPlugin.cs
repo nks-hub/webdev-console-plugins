@@ -60,6 +60,7 @@ public sealed class RedisPlugin : IWdcPlugin, IFrontendPanelProvider
         new UiSchemaBuilder(Id)
             .Category("Caches")
             .Icon("el-icon-coin")
+            .SetServiceCategory("cache", "redis")
             .AddServiceCard("redis")
             .AddConfigEditor("redis")
             .AddLogViewer("redis")

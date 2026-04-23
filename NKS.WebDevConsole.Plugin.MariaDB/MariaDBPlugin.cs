@@ -62,6 +62,7 @@ public sealed class MariaDBPlugin : IWdcPlugin, IFrontendPanelProvider
         new UiSchemaBuilder(Id)
             .Category("Databases")
             .Icon("el-icon-coin")
+            .SetServiceCategory("db", "mariadb")
             .AddServiceCard("mariadb")
             .AddConfigEditor("mariadb")
             .AddLogViewer("mariadb")

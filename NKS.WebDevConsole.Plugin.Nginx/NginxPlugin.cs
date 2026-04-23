@@ -41,6 +41,7 @@ public sealed class NginxPlugin : IWdcPlugin, IFrontendPanelProvider
         new UiSchemaBuilder(Id)
             .Category("Web Servers")
             .Icon("el-icon-connection")
+            .SetServiceCategory("web", "nginx")
             .AddServiceCard("nginx")
             .AddConfigEditor("nginx")
             .AddLogViewer("nginx")

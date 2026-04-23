@@ -1,7 +1,7 @@
 {
   "id": "nks.wdc.mysql",
   "name": "MySQL",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "MySQL 8.x database server \u2014 manages mysqld lifecycle (start/stop/reload), generates my.ini from templates with sensible defaults for local development, auto-initializes the data directory on first run, protects the root password via DPAPI on Windows. Default port: 3307 (3306 reserved for MariaDB). Ships with a database browser panel for CREATE/DROP/dump operations.",
   "provides": [
     "service"

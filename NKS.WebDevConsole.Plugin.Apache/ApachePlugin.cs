@@ -13,7 +13,7 @@ public sealed class ApachePlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.apache";
     public string DisplayName => "Apache HTTP Server";
-    public string Version => "1.0.1";
+    public string Version => "1.0.9";
 
     private ApacheModule? _module;
     private IDisposable? _binaryInstalledSub;
@@ -63,6 +63,7 @@ public sealed class ApachePlugin : IWdcPlugin, IFrontendPanelProvider
         new UiSchemaBuilder(Id)
             .Category("Web Servers")
             .Icon("el-icon-connection")
+            .SetServiceCategory("web", "apache")
             .AddServiceCard("apache")
             .AddConfigEditor("apache")
             .AddLogViewer("apache")
