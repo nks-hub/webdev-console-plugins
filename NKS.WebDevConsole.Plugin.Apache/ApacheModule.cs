@@ -27,15 +27,17 @@ public sealed class ApacheConfig
     // when the repo src dir was the cwd.
     public string VhostsDirectory { get; set; } = Path.Combine(WdcPaths.GeneratedRoot, "apache", "sites-enabled");
     public string LogDirectory { get; set; } = Path.Combine(WdcPaths.LogsRoot, "apache");
-    // Default to privileged ports (80/443) on every OS to match user
-    // expectations — http://localhost/ without a port suffix is what
-    // people type. On macOS/Linux binding <1024 needs sudo; when the
-    // daemon is running unelevated the Start will surface a clear
-    // "Permission denied" error and the user can override the port in
-    // Settings → Apache. Previous default of 8080/8443 on non-Windows
-    // worked silently but broke every bare-hostname link in browsers.
-    public int HttpPort { get; set; } = 80;
-    public int HttpsPort { get; set; } = 443;
+    // Default to :8080/:8443 on every OS so Apache autostart works
+    // unprivileged. Previous default of 80/443 matched typed-URL
+    // ergonomics but failed autostart on macOS/Linux without sudo
+    // (users reported "apache nenabehl jako autostart"). The UI
+    // already surfaces the :8080 URL in the service card (see
+    // webdev-console aed7247), so shifting the default here aligns
+    // plugin behavior with what the UI advertises. Users who insist
+    // on bare http://localhost/ can override back to 80 in Settings →
+    // Apache; hydration will push that down on the next boot.
+    public int HttpPort { get; set; } = 8080;
+    public int HttpsPort { get; set; } = 8443;
     public int GracefulTimeoutSecs { get; set; } = 30;
 }
 

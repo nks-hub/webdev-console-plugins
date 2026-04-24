@@ -1,7 +1,7 @@
 {
   "id": "nks.wdc.apache",
   "displayName": "Apache HTTP Server",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "Apache 2.4 service module \u2014 manages httpd lifecycle, virtual host generation, and config validation.",
   "author": "NKS",
   "license": "Apache-2.0",
@@ -10,8 +10,8 @@
   "serviceId": "apache",
   "serviceType": "WebServer",
   "defaultPorts": [
-    80,
-    443
+    8080,
+    8443
   ],
   "supportedPlatforms": [
     "windows",
