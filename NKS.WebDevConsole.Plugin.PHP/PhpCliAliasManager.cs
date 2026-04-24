@@ -114,7 +114,36 @@ public sealed class PhpCliAliasManager
         foreach (var php in installations)
         {
             var shimPath = await CreateShimAsync(php, shimDirectory, iniDirectory, ct);
-            result[$"php{php.MajorMinor.Replace(".", "")}"] = shimPath;
+            var alias = $"php{php.MajorMinor.Replace(".", "")}";
+            result[alias] = shimPath;
+
+            // Unix: the shim itself lives inside the app bundle's daemon/bin
+            // (read-only, not on the user's PATH). Symlink it into the user's
+            // ~/.local/bin which IS on PATH by default on modern macOS/Linux
+            // setups — that makes `php85`, `php83`, etc. resolvable from any
+            // shell without the user tweaking their dotfiles. We intentionally
+            // avoid /usr/local/bin (would need sudo) and /opt/homebrew/bin
+            // (owned by brew). The symlink is idempotent — rerunning with a
+            // new PHP install just overwrites the link.
+            if (!OperatingSystem.IsWindows())
+            {
+                try
+                {
+                    var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                    var userBin = Path.Combine(home, ".local", "bin");
+                    Directory.CreateDirectory(userBin);
+                    var linkPath = Path.Combine(userBin, alias);
+                    if (File.Exists(linkPath) || new FileInfo(linkPath).Exists)
+                        File.Delete(linkPath);
+                    File.CreateSymbolicLink(linkPath, shimPath);
+                    _logger.LogInformation("PHP alias {Alias} linked: {Link} → {Target}", alias, linkPath, shimPath);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not symlink {Alias} into ~/.local/bin — " +
+                        "shim is still callable via {Shim}", alias, shimPath);
+                }
+            }
         }
 
         if (OperatingSystem.IsWindows())

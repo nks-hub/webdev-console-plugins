@@ -82,6 +82,12 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         _healthChecker = healthChecker;
         _logger = logger;
         _config = config ?? new ApacheConfig();
+
+        // Port hydration from daemon settings is wired on the daemon side
+        // (Program.cs PUT /api/settings hook + ApacheConfig factory). The
+        // plugin itself stays decoupled from the daemon's SettingsStore so
+        // the SDK NuGet contract doesn't need to grow a new interface for
+        // this one use case.
     }
 
     public async Task InitializeAsync(CancellationToken ct)

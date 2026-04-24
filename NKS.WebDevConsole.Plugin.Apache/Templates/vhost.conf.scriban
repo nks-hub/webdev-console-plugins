@@ -24,21 +24,24 @@
     Timeout {{ site.apache_timeout }}
     {{- end }}
 
-    {{ if site.root_parent -}}
-    # Stop Apache from walking into any legacy .htaccess in the
-    # document root's PARENT directory. MAMP migrations frequently
-    # leave stubs like `RewriteRule ^$ www/` or `php_value …` one level
-    # above the served directory; these directives are either
-    # irrelevant (DocumentRoot is already the www child) or
-    # incompatible with mod_fcgid (`php_value` requires mod_php which
-    # WDC does not ship) and cause a hard 500 on every request when
-    # Apache tries to parse them. Setting AllowOverride None here
-    # makes Apache skip the parent .htaccess entirely without
-    # touching the user's files.
-    <Directory "{{ site.root_parent | string.replace '\\' '/' }}">
+    # Seal off ALL ancestor directories from .htaccess walking. MAMP
+    # migrations and user home-dir stubs (e.g. `/Users/<name>/Sites/.htaccess`
+    # with a bare `<IfModule …>`) cause a hard 500 on every request because
+    # Apache walks UP from the docroot looking for .htaccess files and
+    # errors on any directive that's `AllowOverride`-restricted or
+    # context-illegal in that scope. Previously this template only
+    # sealed the *immediate* parent (`root_parent`), which isn't enough
+    # when the offending .htaccess sits two levels up.
+    #
+    # Apache's <Directory> match is longest-wins, so declaring `/`
+    # as override-free plus the specific docroot as AllowOverride All
+    # (further down) gives users writable .htaccess inside their site
+    # root and NOTHING executed above it. Require all denied is balanced
+    # by the docroot's `Require all granted`.
+    <Directory "/">
         AllowOverride None
+        Require all denied
     </Directory>
-    {{- end }}
 
     SSLEngine on
     SSLCertificateFile "{{ site.cert_path | string.replace '\\' '/' }}"
@@ -129,21 +132,24 @@
     Timeout {{ site.apache_timeout }}
     {{- end }}
 
-    {{ if site.root_parent -}}
-    # Stop Apache from walking into any legacy .htaccess in the
-    # document root's PARENT directory. MAMP migrations frequently
-    # leave stubs like `RewriteRule ^$ www/` or `php_value …` one level
-    # above the served directory; these directives are either
-    # irrelevant (DocumentRoot is already the www child) or
-    # incompatible with mod_fcgid (`php_value` requires mod_php which
-    # WDC does not ship) and cause a hard 500 on every request when
-    # Apache tries to parse them. Setting AllowOverride None here
-    # makes Apache skip the parent .htaccess entirely without
-    # touching the user's files.
-    <Directory "{{ site.root_parent | string.replace '\\' '/' }}">
+    # Seal off ALL ancestor directories from .htaccess walking. MAMP
+    # migrations and user home-dir stubs (e.g. `/Users/<name>/Sites/.htaccess`
+    # with a bare `<IfModule …>`) cause a hard 500 on every request because
+    # Apache walks UP from the docroot looking for .htaccess files and
+    # errors on any directive that's `AllowOverride`-restricted or
+    # context-illegal in that scope. Previously this template only
+    # sealed the *immediate* parent (`root_parent`), which isn't enough
+    # when the offending .htaccess sits two levels up.
+    #
+    # Apache's <Directory> match is longest-wins, so declaring `/`
+    # as override-free plus the specific docroot as AllowOverride All
+    # (further down) gives users writable .htaccess inside their site
+    # root and NOTHING executed above it. Require all denied is balanced
+    # by the docroot's `Require all granted`.
+    <Directory "/">
         AllowOverride None
+        Require all denied
     </Directory>
-    {{- end }}
 
     <Directory "{{ site.root | string.replace '\\' '/' }}">
         # Indexes: MAMP enables directory listing by default; we match
