@@ -207,6 +207,27 @@ internal static class NksDeployRoutes
             var rejection = await CheckIntentAsync(ctx, intentValidator, "rollback", domain, run.Host, ct);
             if (rejection is not null) return rejection;
 
+            // Phase 5 hardening — refuse to rollback while another deploy /
+            // rollback is in-flight against the same (domain, host). The
+            // backend would otherwise race the symlink switch and leave the
+            // release tree in a half-written state. The in-flight set is
+            // small (typically 0-1 rows per host), so a full scan is fine.
+            var inFlight = await runs.ListInFlightAsync(ct);
+            var conflict = inFlight.FirstOrDefault(r =>
+                string.Equals(r.Domain, domain, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(r.Host, run.Host, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(r.Id, deployId, StringComparison.OrdinalIgnoreCase));
+            if (conflict is not null)
+            {
+                return Results.Conflict(new
+                {
+                    error = "deploy_in_flight",
+                    message = "Another deploy or rollback is currently running on this host. Wait for it to finish or cancel it first.",
+                    blockingDeployId = conflict.Id,
+                    blockingStatus = conflict.Status,
+                });
+            }
+
             await backend.RollbackAsync(deployId, ct);
             return Results.Accepted(value: new { sourceDeployId = deployId, status = "rolled_back" });
         }
