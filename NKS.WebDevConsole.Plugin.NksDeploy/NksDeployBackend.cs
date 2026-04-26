@@ -38,7 +38,22 @@ public sealed class NksDeployBackend : IDeployBackend
     private readonly IDeployRunsRepository _runs;
     private readonly ILogger<NksDeployBackend> _logger;
 
-    private readonly ConcurrentDictionary<string, CancellationTokenSource> _active = new();
+    /// <summary>
+    /// In-flight subprocess registry. Keyed by DeployId, value carries both
+    /// the linked CTS (for graceful cancel) and the subprocess PID (for
+    /// the watchdog force-kill path when the PHP child ignores the SIGTERM
+    /// CliWrap sends on token cancellation). PID is set the moment CliWrap
+    /// emits its <c>StartedCommandEvent</c>.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, ActiveDeploy> _active = new();
+
+    /// <summary>Mutable so the deploy task can stamp the PID after spawn.</summary>
+    private sealed class ActiveDeploy
+    {
+        public ActiveDeploy(CancellationTokenSource cts) { Cts = cts; }
+        public CancellationTokenSource Cts { get; }
+        public int? Pid { get; set; }
+    }
 
     public NksDeployBackend(
         ISiteRegistry siteRegistry,
@@ -107,7 +122,8 @@ public sealed class NksDeployBackend : IDeployBackend
         // Per-deploy CTS so CancelAsync can signal without affecting the
         // shared CT supplied by the caller.
         var deployCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        _active[deployId] = deployCts;
+        var active = new ActiveDeploy(deployCts);
+        _active[deployId] = active;
 
         var sw = Stopwatch.StartNew();
         var success = false;
@@ -141,6 +157,13 @@ public sealed class NksDeployBackend : IDeployBackend
             {
                 switch (ev)
                 {
+                    case StartedCommandEvent started:
+                        // Stamp the PID into the active registry as soon as
+                        // CliWrap reports it — the watchdog in CancelAsync
+                        // needs this to escalate from CTS-cancel to a real
+                        // OS-level kill if the PHP child ignores SIGTERM.
+                        active.Pid = started.ProcessId;
+                        break;
                     case StandardOutputCommandEvent stdout:
                         await HandleStdoutLineAsync(deployId, request.Domain, stdout.Text, progress, deployCts.Token);
                         break;
@@ -353,16 +376,72 @@ public sealed class NksDeployBackend : IDeployBackend
         }
     }
 
+    /// <summary>
+    /// Two-phase cancel: signal the linked CTS (CliWrap translates this to
+    /// a SIGTERM-equivalent on the child), then start a 10-second watchdog
+    /// task. If the deploy is still in <see cref="_active"/> after the
+    /// grace window we OS-kill the process tree by PID — this guards
+    /// against PHP scripts that swallow SIGTERM (long-blocking SSH
+    /// transfer, hook script with a sleep loop, etc.).
+    ///
+    /// Returns immediately so REST handlers don't block on the 10 s grace.
+    /// </summary>
     public Task CancelAsync(string deployId, CancellationToken ct)
     {
-        if (_active.TryGetValue(deployId, out var cts))
+        if (!_active.TryGetValue(deployId, out var active))
         {
-            cts.Cancel();
-            return Task.CompletedTask;
+            // Unknown id (already completed / never started) — surface a soft error;
+            // the daemon REST handler maps this to 409.
+            throw new InvalidOperationException($"No active deploy with id {deployId}");
         }
-        // Unknown id (already completed / never started) — surface a soft error;
-        // the daemon REST handler maps this to 409.
-        throw new InvalidOperationException($"No active deploy with id {deployId}");
+
+        try { active.Cts.Cancel(); }
+        catch (ObjectDisposedException) { /* race with completion finally */ }
+
+        // Watchdog: if the deploy is still registered after 10 seconds,
+        // SIGKILL the process tree. We snapshot the PID at fire time —
+        // even if the entry vanished between schedule and fire we just
+        // exit cleanly.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10));
+                if (!_active.TryGetValue(deployId, out var stillActive)) return;
+                var pid = stillActive.Pid;
+                if (pid is null)
+                {
+                    _logger.LogWarning(
+                        "Cancel watchdog for {DeployId} — no PID recorded; cannot escalate to kill",
+                        deployId);
+                    return;
+                }
+                try
+                {
+                    using var proc = Process.GetProcessById(pid.Value);
+                    _logger.LogWarning(
+                        "Cancel watchdog: PHP subprocess for {DeployId} (pid={Pid}) ignored SIGTERM, force-killing process tree",
+                        deployId, pid.Value);
+                    proc.Kill(entireProcessTree: true);
+                }
+                catch (ArgumentException)
+                {
+                    // Process already exited between the active-check and
+                    // GetProcessById — happy path, nothing to do.
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "Cancel watchdog failed to kill pid={Pid} for {DeployId}", pid.Value, deployId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Cancel watchdog for {DeployId} threw", deployId);
+            }
+        });
+
+        return Task.CompletedTask;
     }
 
     // ────────────────────────── helpers ──────────────────────────
