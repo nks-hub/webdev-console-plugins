@@ -41,6 +41,8 @@ internal static class NksDeployRoutes
         r.MapPost("sites/{domain}/groups", StartGroup);
         r.MapGet("sites/{domain}/groups/{groupId}", GetGroup);
         r.MapPost("sites/{domain}/groups/{groupId}/rollback", PostGroupRollback);
+        // Phase 6.7 — group history list (newest first, limit-bounded).
+        r.MapGet("sites/{domain}/groups", ListGroups);
         // Phase 6.3 — per-site settings persistence + snapshot inventory.
         r.MapGet("sites/{domain}/settings", GetSettings);
         r.MapPut("sites/{domain}/settings", PutSettings);
@@ -413,6 +415,32 @@ internal static class NksDeployRoutes
         var status = await coordinator.GetGroupStatusAsync(groupId, ct);
         if (status is null) return Results.NotFound(new { error = "group_not_found", groupId });
         return Results.Ok(status);
+    }
+
+    /// <summary>
+    /// Phase 6.7 — list groups for the site (newest started_at first).
+    /// limit defaults to 50, capped server-side at 200 by the repo.
+    /// </summary>
+    private static async Task<IResult> ListGroups(
+        string domain,
+        IDeployGroupsRepository groupsRepo,
+        CancellationToken ct,
+        int limit = 50)
+    {
+        var rows = await groupsRepo.ListForDomainAsync(domain, limit, ct);
+        var entries = rows.Select(r => new
+        {
+            id = r.Id,
+            domain = r.Domain,
+            hosts = r.Hosts,
+            hostDeployIds = r.HostDeployIds,
+            phase = r.Phase,
+            startedAt = r.StartedAt.ToString("o"),
+            completedAt = r.CompletedAt?.ToString("o"),
+            errorMessage = r.ErrorMessage,
+            triggeredBy = r.TriggeredBy,
+        }).ToList();
+        return Results.Ok(new { domain, count = entries.Count, entries });
     }
 
     private static async Task<IResult> PostGroupRollback(
