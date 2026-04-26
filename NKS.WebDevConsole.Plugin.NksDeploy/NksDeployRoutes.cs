@@ -34,7 +34,21 @@ internal static class NksDeployRoutes
         r.MapGet("sites/{domain}/history", GetHistory);
         r.MapPost("sites/{domain}/deploys/{deployId}/rollback", PostRollback);
         r.MapDelete("sites/{domain}/deploys/{deployId}", DeleteDeploy);
+        // Phase 6.1 — atomic multi-host group fan-out.
+        r.MapPost("sites/{domain}/groups", StartGroup);
+        r.MapGet("sites/{domain}/groups/{groupId}", GetGroup);
+        r.MapPost("sites/{domain}/groups/{groupId}/rollback", PostGroupRollback);
     }
+
+    /// <summary>
+    /// Body for POST .../groups. Hosts is required; per-host idempotency
+    /// keys are derived as <c>"{groupKey}::{host}"</c> by the coordinator
+    /// so retries within the same group dedupe correctly.
+    /// </summary>
+    public sealed record StartGroupBody(
+        IReadOnlyList<string>? Hosts,
+        string? IdempotencyKey,
+        JsonElement? Options);
 
     /// <summary>
     /// Common header used by the MCP server to attach a daemon-issued,
@@ -316,6 +330,101 @@ internal static class NksDeployRoutes
         {
             // Backend says no active deploy — treat as 409 (already terminal).
             return Results.Conflict(new { error = "deploy_not_active", message = ex.Message, deployId });
+        }
+    }
+
+    // ──────────────────────── Phase 6.1 group endpoints ────────────────────────
+
+    private static async Task<IResult> StartGroup(
+        string domain,
+        StartGroupBody? body,
+        IDeployGroupCoordinator coordinator,
+        IDeployEventBroadcaster broadcaster,
+        IDeployIntentValidator intentValidator,
+        ILoggerFactory loggerFactory,
+        HttpContext ctx)
+    {
+        if (body?.Hosts is null || body.Hosts.Count == 0)
+        {
+            return Results.BadRequest(new { error = "hosts_required", message = "Provide at least one host." });
+        }
+
+        // Group-level intent validation: bind the token to a synthetic
+        // host marker "*group*" so a single intent authorises the whole
+        // fan-out. Per-host intents would force the AI to mint N tokens
+        // for one user-visible action — bad UX. Operators issuing intents
+        // for groups MUST request kind=deploy with host="*group*".
+        var rejection = await CheckIntentAsync(ctx, intentValidator, "deploy", domain, "*group*", ctx.RequestAborted);
+        if (rejection is not null) return rejection;
+
+        var idempotencyKey = body.IdempotencyKey ?? Guid.NewGuid().ToString();
+        var optsElement = body.Options ?? JsonDocument.Parse("{}").RootElement;
+        var req = new DeployGroupRequest(
+            Domain: domain,
+            Hosts: body.Hosts,
+            IdempotencyKey: idempotencyKey,
+            TriggeredBy: ResolveTriggeredBy(ctx),
+            BackendOptions: optsElement);
+
+        var logger = loggerFactory.CreateLogger("NksDeploy.GroupRoutes");
+        var progress = new Progress<DeployGroupEvent>(evt =>
+        {
+            _ = broadcaster.BroadcastAsync("deploy:group-event", evt)
+                .ContinueWith(t =>
+                {
+                    if (t.IsFaulted) logger.LogWarning(t.Exception, "SSE broadcast for group event failed");
+                }, TaskScheduler.Default);
+        });
+
+        try
+        {
+            var groupId = await coordinator.StartGroupAsync(req, progress, ctx.RequestAborted);
+            return Results.Accepted(value: new { groupId, idempotencyKey, hostCount = body.Hosts.Count });
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.BadRequest(new { error = "invalid_request", message = ex.Message });
+        }
+    }
+
+    private static async Task<IResult> GetGroup(
+        string domain,
+        string groupId,
+        IDeployGroupCoordinator coordinator,
+        CancellationToken ct)
+    {
+        var status = await coordinator.GetGroupStatusAsync(groupId, ct);
+        if (status is null) return Results.NotFound(new { error = "group_not_found", groupId });
+        return Results.Ok(status);
+    }
+
+    private static async Task<IResult> PostGroupRollback(
+        string domain,
+        string groupId,
+        IDeployGroupCoordinator coordinator,
+        IDeployIntentValidator intentValidator,
+        HttpContext ctx,
+        CancellationToken ct)
+    {
+        // Same wildcard host marker as StartGroup so intent verbs map cleanly.
+        var rejection = await CheckIntentAsync(ctx, intentValidator, "rollback", domain, "*group*", ct);
+        if (rejection is not null) return rejection;
+
+        try
+        {
+            await coordinator.RollbackGroupAsync(groupId, ct);
+            return Results.Accepted(value: new { groupId, status = "rollback_initiated" });
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound(new { error = "group_not_found", groupId });
+        }
+        catch (Exception ex)
+        {
+            return Results.Problem(
+                title: "group_rollback_failed",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status500InternalServerError);
         }
     }
 }
