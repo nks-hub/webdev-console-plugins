@@ -305,7 +305,8 @@ public sealed class NksDeployBackend : IDeployBackend
             CompletedAt: row.CompletedAt,
             ReleaseId: row.ReleaseId,
             CommitSha: row.CommitSha,
-            FinalPhase: phase);
+            FinalPhase: phase,
+            GroupId: row.GroupId);
     }
 
     public async Task<IReadOnlyList<DeployHistoryEntry>> GetHistoryAsync(string domain, int limit, CancellationToken ct)
