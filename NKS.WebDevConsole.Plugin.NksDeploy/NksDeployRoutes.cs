@@ -49,6 +49,9 @@ internal static class NksDeployRoutes
         // Phase 6.4 — operator-driven snapshot restore. Destructive — gated
         // by intent token AND requires an explicit confirm flag in body.
         r.MapPost("sites/{domain}/snapshots/{deployId}/restore", PostSnapshotRestore);
+        // Phase 6.6 — on-demand snapshot WITHOUT a deploy. Useful before
+        // manual DB ops (large migration via SQL client, schema rename).
+        r.MapPost("sites/{domain}/snapshot-now", PostSnapshotNow);
     }
 
     /// <summary>
@@ -575,6 +578,83 @@ internal static class NksDeployRoutes
 
     private static string SettingsPath(string domain) =>
         Path.Combine(SettingsDir(domain), "deploy-settings.json");
+
+    // ──────────────────────── Phase 6.6 on-demand snapshot ────────────────────────
+
+    /// <summary>
+    /// Take a database snapshot WITHOUT firing a deploy. Persists a
+    /// synthetic deploy_runs row tagged backend_id=<c>"manual-snapshot"</c>
+    /// + status=<c>"completed"</c> so the snapshot shows up in the
+    /// per-site snapshot inventory and can be restored via the standard
+    /// flow. Operator must confirm via body since this still touches the
+    /// site's DB connection (reads only — no writes here).
+    ///
+    /// Useful before manual DB ops: large schema migrations, column
+    /// renames, ad-hoc data fixes via mysql client. The snapshot is then
+    /// available to restore via the existing endpoint if the manual op
+    /// goes wrong.
+    /// </summary>
+    private static async Task<IResult> PostSnapshotNow(
+        string domain,
+        IPreDeploySnapshotter snapshotter,
+        IDeployRunsRepository runs,
+        HttpContext ctx,
+        CancellationToken ct)
+    {
+        // Synthetic id for the deploy_runs row — namespaced so reports can
+        // distinguish it from real deploys via the prefix.
+        var id = Guid.NewGuid().ToString("D");
+        var now = DateTimeOffset.UtcNow;
+        var row = new DeployRunRow(
+            Id: id,
+            Domain: domain,
+            Host: "*manual*",
+            ReleaseId: null,
+            Branch: null,
+            CommitSha: null,
+            Status: "running", // will flip to completed after snapshot succeeds
+            IsPastPonr: false,
+            StartedAt: now,
+            CompletedAt: null,
+            ExitCode: null,
+            ErrorMessage: null,
+            DurationMs: null,
+            TriggeredBy: ResolveTriggeredBy(ctx),
+            BackendId: "manual-snapshot",
+            CreatedAt: now,
+            UpdatedAt: now);
+        await runs.InsertAsync(row, ct);
+
+        try
+        {
+            var result = await snapshotter.CreateAsync(domain, id, ct);
+            await runs.UpdatePreDeployBackupAsync(id, result.Path, result.SizeBytes, ct);
+            await runs.MarkCompletedAsync(id,
+                success: true, exitCode: 0, errorMessage: null,
+                durationMs: (long)result.Duration.TotalMilliseconds, ct);
+            return Results.Ok(new
+            {
+                snapshotId = id,
+                domain,
+                path = result.Path,
+                sizeBytes = result.SizeBytes,
+                durationMs = (long)result.Duration.TotalMilliseconds,
+            });
+        }
+        catch (Exception ex)
+        {
+            // Surface the failure on the synthetic row so the snapshot list
+            // shows it as failed rather than dangling in 'running'.
+            await runs.MarkCompletedAsync(id,
+                success: false, exitCode: null,
+                errorMessage: $"snapshot_now_failed: {ex.Message}",
+                durationMs: 0, ct);
+            return Results.Problem(
+                title: "snapshot_now_failed",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
 
     // ──────────────────────── Phase 6.4 snapshot restore ────────────────────────
 
