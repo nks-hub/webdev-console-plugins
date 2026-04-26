@@ -1,0 +1,15 @@
+{
+  "id": "nks.wdc.deploy.localrsync",
+  "displayName": "Local rsync deploy",
+  "version": "0.1.0",
+  "description": "IDeployBackend that publishes the site directory to a local target via rsync. Exists to validate that the IDeployBackend abstraction is not shaped inside-out around nksdeploy's vocabulary — this backend has no PHP runtime, no SSH, no remote .deploy-lock, and no symlink-switch step. Useful for previews, dry-runs, and as a template for future backends (Capistrano, Kamal, custom).",
+  "author": "NKS",
+  "license": "MIT",
+  "entryAssembly": "NKS.WebDevConsole.Plugin.LocalRsync.dll",
+  "entryType": "NKS.WebDevConsole.Plugin.LocalRsync.LocalRsyncPlugin",
+  "serviceType": "Other",
+  "supportedPlatforms": ["macos", "linux"],
+  "minDaemonVersion": "1.0.0",
+  "dependencies": [],
+  "capabilities": ["deploy-backend"]
+}
