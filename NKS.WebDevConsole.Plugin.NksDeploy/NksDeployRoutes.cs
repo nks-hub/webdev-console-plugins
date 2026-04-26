@@ -25,7 +25,10 @@ internal static class NksDeployRoutes
     /// freeform JsonElement so future flags (skip-tests, branch override)
     /// don't need REST-layer changes.
     /// </summary>
-    public sealed record StartDeployBody(string? IdempotencyKey, JsonElement? Options);
+    public sealed record StartDeployBody(
+        string? IdempotencyKey,
+        JsonElement? Options,
+        DeploySnapshotOptions? Snapshot = null);
 
     public static void Register(EndpointRegistration r)
     {
@@ -48,7 +51,8 @@ internal static class NksDeployRoutes
     public sealed record StartGroupBody(
         IReadOnlyList<string>? Hosts,
         string? IdempotencyKey,
-        JsonElement? Options);
+        JsonElement? Options,
+        DeploySnapshotOptions? Snapshot = null);
 
     /// <summary>
     /// Common header used by the MCP server to attach a daemon-issued,
@@ -148,7 +152,8 @@ internal static class NksDeployRoutes
             Host: host,
             IdempotencyKey: idempotencyKey,
             TriggeredBy: ResolveTriggeredBy(ctx),
-            BackendOptions: optsElement);
+            BackendOptions: optsElement,
+            Snapshot: body?.Snapshot);
 
         // IProgress that fans out to SSE so the wdc UI's deploy drawer
         // updates in real time. The caller is fire-and-forget — we return
@@ -364,7 +369,8 @@ internal static class NksDeployRoutes
             Hosts: body.Hosts,
             IdempotencyKey: idempotencyKey,
             TriggeredBy: ResolveTriggeredBy(ctx),
-            BackendOptions: optsElement);
+            BackendOptions: optsElement,
+            Snapshot: body.Snapshot);
 
         var logger = loggerFactory.CreateLogger("NksDeploy.GroupRoutes");
         var progress = new Progress<DeployGroupEvent>(evt =>

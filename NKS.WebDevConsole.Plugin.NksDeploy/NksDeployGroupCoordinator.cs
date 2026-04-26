@@ -190,7 +190,11 @@ public sealed class NksDeployGroupCoordinator : IDeployGroupCoordinator
                         Host: host,
                         IdempotencyKey: $"{req.IdempotencyKey}::{host}",
                         TriggeredBy: req.TriggeredBy,
-                        BackendOptions: req.BackendOptions);
+                        BackendOptions: req.BackendOptions,
+                        // Phase 6.2 — fan out the snapshot opt-in. Each
+                        // host snapshots its own DB; the coordinator does
+                        // NOT assume hosts share a database.
+                        Snapshot: req.Snapshot);
                     var deployId = await _backend.StartDeployAsync(hostReq, perHostProgress, ct);
                     await _groups.RecordHostDeployAsync(groupId, host, deployId, ct);
                     var status = await _backend.GetStatusAsync(deployId, ct);

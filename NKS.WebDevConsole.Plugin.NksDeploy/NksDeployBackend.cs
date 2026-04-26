@@ -36,6 +36,7 @@ public sealed class NksDeployBackend : IDeployBackend
 {
     private readonly ISiteRegistry _siteRegistry;
     private readonly IDeployRunsRepository _runs;
+    private readonly IPreDeploySnapshotter? _snapshotter;
     private readonly ILogger<NksDeployBackend> _logger;
 
     /// <summary>
@@ -58,11 +59,16 @@ public sealed class NksDeployBackend : IDeployBackend
     public NksDeployBackend(
         ISiteRegistry siteRegistry,
         IDeployRunsRepository runs,
-        ILogger<NksDeployBackend> logger)
+        ILogger<NksDeployBackend> logger,
+        IPreDeploySnapshotter? snapshotter = null)
     {
         _siteRegistry = siteRegistry;
         _runs = runs;
         _logger = logger;
+        // Snapshotter is optional — older daemons without Phase 6.2 wiring
+        // still resolve this backend without binding break. When null,
+        // request.Snapshot is silently ignored (logged at debug).
+        _snapshotter = snapshotter;
     }
 
     public string BackendId => "nks-deploy";
@@ -118,6 +124,52 @@ public sealed class NksDeployBackend : IDeployBackend
             CreatedAt: startedAt,
             UpdatedAt: startedAt
         ), ct);
+
+        // Phase 6.2 — pre-deploy DB snapshot. Runs BEFORE we spawn the
+        // PHP subprocess so a snapshot failure aborts the deploy with
+        // zero side effects. Best-effort skip when no snapshotter is
+        // wired (older daemons) or Snapshot.Include is false.
+        if (request.Snapshot is { Include: true } && _snapshotter is not null)
+        {
+            progress.Report(new DeployEvent(
+                DeployId: deployId,
+                Phase: DeployPhase.PreflightChecks,
+                Step: "pre_deploy_backup",
+                Message: "Snapshotting database before deploy",
+                Timestamp: DateTimeOffset.UtcNow,
+                IsTerminal: false,
+                IsPastPonr: false));
+            try
+            {
+                var snap = await _snapshotter.CreateAsync(request.Domain, deployId, ct);
+                await _runs.UpdatePreDeployBackupAsync(deployId, snap.Path, snap.SizeBytes, ct);
+                progress.Report(new DeployEvent(
+                    DeployId: deployId,
+                    Phase: DeployPhase.PreflightChecks,
+                    Step: "pre_deploy_backup",
+                    Message: $"Snapshot ok: {snap.Path} ({snap.SizeBytes} bytes, {snap.Duration.TotalMilliseconds:F0} ms)",
+                    Timestamp: DateTimeOffset.UtcNow,
+                    IsTerminal: false,
+                    IsPastPonr: false));
+            }
+            catch (Exception snapEx)
+            {
+                _logger.LogError(snapEx, "[{DeployId}] pre-deploy snapshot FAILED — aborting deploy", deployId);
+                await _runs.MarkCompletedAsync(deployId,
+                    success: false, exitCode: null,
+                    errorMessage: $"pre_deploy_backup_failed: {snapEx.Message}",
+                    durationMs: 0, ct);
+                progress.Report(new DeployEvent(
+                    DeployId: deployId,
+                    Phase: DeployPhase.Failed,
+                    Step: "pre_deploy_backup",
+                    Message: $"Snapshot failed: {snapEx.Message}",
+                    Timestamp: DateTimeOffset.UtcNow,
+                    IsTerminal: true,
+                    IsPastPonr: false));
+                throw;
+            }
+        }
 
         // Per-deploy CTS so CancelAsync can signal without affecting the
         // shared CT supplied by the caller.
