@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>NKS.WebDevConsole.Plugin.NksDeploy</AssemblyName>
+    <RootNamespace>NKS.WebDevConsole.Plugin.NksDeploy</RootNamespace>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="CliWrap" Version="3.10.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.6" />
+  </ItemGroup>
+
+  <!-- Local-dev override: when the nks-ws monorepo is checked out as a sibling
+       at ../../nks-ws (the standard layout under C:\work\sources\), reference
+       the SDK csproj directly so unreleased SDK changes (e.g. the new
+       IDeployBackend interface from the integration branch) are picked up
+       without waiting for a publish-sdk.yml run. CI without the sibling repo
+       falls back to the Directory.Build.props PackageReference (currently 0.2.4
+       — must be bumped to a release containing IDeployBackend before this
+       plugin is published from CI). -->
+  <ItemGroup Condition="Exists('..\..\nks-ws\src\daemon\NKS.WebDevConsole.Plugin.SDK\NKS.WebDevConsole.Plugin.SDK.csproj')">
+    <PackageReference Remove="NKS.WebDevConsole.Plugin.SDK" />
+    <ProjectReference Include="..\..\nks-ws\src\daemon\NKS.WebDevConsole.Plugin.SDK\NKS.WebDevConsole.Plugin.SDK.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="plugin.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+</Project>
