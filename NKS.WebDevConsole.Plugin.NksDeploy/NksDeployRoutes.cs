@@ -41,6 +41,11 @@ internal static class NksDeployRoutes
         r.MapPost("sites/{domain}/groups", StartGroup);
         r.MapGet("sites/{domain}/groups/{groupId}", GetGroup);
         r.MapPost("sites/{domain}/groups/{groupId}/rollback", PostGroupRollback);
+        // Phase 6.3 — per-site settings persistence + snapshot inventory.
+        r.MapGet("sites/{domain}/settings", GetSettings);
+        r.MapPut("sites/{domain}/settings", PutSettings);
+        r.MapGet("sites/{domain}/snapshots", ListSnapshots);
+        r.MapGet("sites/{domain}/snapshot-info", GetSnapshotInfo);
     }
 
     /// <summary>
@@ -433,4 +438,138 @@ internal static class NksDeployRoutes
                 statusCode: StatusCodes.Status500InternalServerError);
         }
     }
+
+    // ──────────────────────── Phase 6.3 settings + snapshots ────────────────────────
+
+    /// <summary>
+    /// Returns the per-site deploy settings JSON blob, or HTTP 200 with an
+    /// empty object if no settings file exists yet (frontend supplies its
+    /// own defaults via defaultDeploySettings()). Pass-through JSON — the
+    /// daemon doesn't validate the structure; the frontend types are the
+    /// source of truth.
+    /// </summary>
+    private static IResult GetSettings(string domain)
+    {
+        var path = SettingsPath(domain);
+        if (!File.Exists(path)) return Results.Ok(new { });
+        try
+        {
+            var text = File.ReadAllText(path);
+            using var doc = JsonDocument.Parse(text);
+            return Results.Json(doc.RootElement.Clone());
+        }
+        catch (JsonException ex)
+        {
+            return Results.Problem(
+                title: "settings_corrupted",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
+
+    /// <summary>
+    /// Atomic write of the per-site deploy settings. Body MUST be a JSON
+    /// object (we don't validate the shape — frontend owns the schema).
+    /// Uses temp+rename so a crashed write never corrupts an existing file.
+    /// </summary>
+    private static async Task<IResult> PutSettings(string domain, HttpContext ctx)
+    {
+        try
+        {
+            using var doc = await JsonDocument.ParseAsync(ctx.Request.Body);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return Results.BadRequest(new { error = "body_must_be_object" });
+            }
+            var dir = SettingsDir(domain);
+            Directory.CreateDirectory(dir);
+            var path = SettingsPath(domain);
+            var tmp = path + ".tmp";
+            await File.WriteAllTextAsync(tmp, doc.RootElement.GetRawText());
+            File.Move(tmp, path, overwrite: true);
+            return Results.NoContent();
+        }
+        catch (JsonException ex)
+        {
+            return Results.BadRequest(new { error = "invalid_json", detail = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// List pre-deploy snapshot files for this site by scanning the deploy
+    /// runs table for rows that wrote a pre_deploy_backup_path. Snapshots
+    /// belonging to other sites are filtered out by joining on domain.
+    /// </summary>
+    private static async Task<IResult> ListSnapshots(
+        string domain,
+        IDeployRunsRepository runs,
+        CancellationToken ct)
+    {
+        var rows = await runs.ListForDomainAsync(domain, limit: 200, ct);
+        var entries = rows
+            .Where(r => !string.IsNullOrEmpty(r.PreDeployBackupPath))
+            .Select(r => new
+            {
+                id = r.Id,
+                createdAt = r.StartedAt.ToString("o"),
+                sizeBytes = r.PreDeployBackupSizeBytes ?? 0L,
+                path = r.PreDeployBackupPath!,
+            })
+            .ToList();
+        return Results.Ok(entries);
+    }
+
+    /// <summary>
+    /// Auto-detect snapshotable database for this site. Mirrors the scan
+    /// PreDeploySnapshotter does internally so the GUI can show a banner
+    /// like "SQLite detected at /var/.../app.sqlite" before the user opts
+    /// in. Returns { detected: bool, type: 'sqlite'|'mysql'|'pg'|null,
+    /// path?: string, hint: string }.
+    /// </summary>
+    private static IResult GetSnapshotInfo(string domain, ISiteRegistry sites)
+    {
+        var site = sites.GetSite(domain);
+        if (site is null) return Results.NotFound(new { error = "site_not_found", domain });
+
+        var siteRoot = Directory.GetParent(site.DocumentRoot)?.FullName ?? site.DocumentRoot;
+        string[] dirs = { siteRoot, Path.Combine(siteRoot, "app"), Path.Combine(siteRoot, "var"),
+            Path.Combine(siteRoot, "data"), Path.Combine(siteRoot, "db"),
+            Path.Combine(siteRoot, "database"), site.DocumentRoot };
+        string[] exts = { "*.sqlite", "*.sqlite3", "*.db" };
+        foreach (var dir in dirs)
+        {
+            if (!Directory.Exists(dir)) continue;
+            foreach (var ext in exts)
+            {
+                try
+                {
+                    var hit = Directory.EnumerateFiles(dir, ext).FirstOrDefault();
+                    if (hit is not null)
+                    {
+                        return Results.Ok(new
+                        {
+                            detected = true,
+                            type = "sqlite",
+                            path = hit,
+                            hint = "SQLite database detected — pre-deploy snapshot will copy + gzip this file.",
+                        });
+                    }
+                }
+                catch (UnauthorizedAccessException) { /* skip */ }
+            }
+        }
+        return Results.Ok(new
+        {
+            detected = false,
+            type = (string?)null,
+            path = (string?)null,
+            hint = "No SQLite database found. MySQL/PostgreSQL snapshot integration ships in Phase 6.3 (mysqldump/pg_dump with credential resolution).",
+        });
+    }
+
+    private static string SettingsDir(string domain) =>
+        Path.Combine(NKS.WebDevConsole.Core.Services.WdcPaths.SitesRoot, domain);
+
+    private static string SettingsPath(string domain) =>
+        Path.Combine(SettingsDir(domain), "deploy-settings.json");
 }
