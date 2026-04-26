@@ -44,6 +44,14 @@ internal static class NksDeployRoutes
     private const string IntentTokenHeader = "X-Intent-Token";
 
     /// <summary>
+    /// CI / headless escape hatch — when set to "true" the validator
+    /// pre-stamps <c>confirmed_at</c> instead of waiting for the GUI
+    /// banner approval. The MCP server only sets this when the operator
+    /// has explicitly opted-in via <c>MCP_DEPLOY_AUTO_APPROVE=true</c>.
+    /// </summary>
+    private const string AllowUnconfirmedHeader = "X-Allow-Unconfirmed";
+
+    /// <summary>
     /// Returns "mcp" when the request carried a valid intent token, "gui"
     /// otherwise. Drives the deploy_runs.triggered_by column so the audit
     /// trail and history filter can distinguish AI-initiated deploys.
@@ -71,14 +79,34 @@ internal static class NksDeployRoutes
         if (!ctx.Request.Headers.TryGetValue(IntentTokenHeader, out var raw)) return null;
         var token = raw.ToString();
         if (string.IsNullOrWhiteSpace(token)) return null;
-        var result = await validator.ValidateAndConsumeAsync(token, kind, domain, host, ct);
-        if (!result.Ok)
+
+        // Headless / CI bypass for the GUI confirm banner. The MCP server
+        // only attaches this header when MCP_DEPLOY_AUTO_APPROVE=true is
+        // set in its environment, so we trust the bearer-authenticated
+        // caller's intent here.
+        var allowUnconfirmed = ctx.Request.Headers.TryGetValue(AllowUnconfirmedHeader, out var hv)
+            && string.Equals(hv.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+
+        var result = await validator.ValidateAndConsumeAsync(token, kind, domain, host, allowUnconfirmed, ct);
+        if (result.Ok) return null;
+
+        // Map the pending-confirmation reason to 425 Too Early so the MCP
+        // client can show a clear "approve in GUI" hint instead of treating
+        // the rejection as a permanent failure.
+        if (string.Equals(result.Reason, "pending_confirmation", StringComparison.Ordinal))
         {
             return Results.Json(
-                new { error = "intent_invalid", reason = result.Reason },
-                statusCode: StatusCodes.Status403Forbidden);
+                new
+                {
+                    error = "intent_pending_confirmation",
+                    reason = result.Reason,
+                    hint = "User must approve the deploy in the wdc GUI banner. Re-issue this call once approved.",
+                },
+                statusCode: 425); // Too Early — RFC 8470, not in StatusCodes constants
         }
-        return null;
+        return Results.Json(
+            new { error = "intent_invalid", reason = result.Reason },
+            statusCode: StatusCodes.Status403Forbidden);
     }
 
     private static async Task<IResult> StartDeploy(
