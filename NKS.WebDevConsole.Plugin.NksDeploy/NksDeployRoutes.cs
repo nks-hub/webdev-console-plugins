@@ -424,22 +424,41 @@ internal static class NksDeployRoutes
     private static async Task<IResult> ListGroups(
         string domain,
         IDeployGroupsRepository groupsRepo,
+        IDeployRunsRepository runsRepo,
         CancellationToken ct,
         int limit = 50)
     {
         var rows = await groupsRepo.ListForDomainAsync(domain, limit, ct);
-        var entries = rows.Select(r => new
+        var entries = new List<object>(rows.Count);
+        foreach (var r in rows)
         {
-            id = r.Id,
-            domain = r.Domain,
-            hosts = r.Hosts,
-            hostDeployIds = r.HostDeployIds,
-            phase = r.Phase,
-            startedAt = r.StartedAt.ToString("o"),
-            completedAt = r.CompletedAt?.ToString("o"),
-            errorMessage = r.ErrorMessage,
-            triggeredBy = r.TriggeredBy,
-        }).ToList();
+            // Phase 6.15b — enrich with per-host run status so the GUI
+            // can offer "replay only failed hosts" subset.
+            // Only fetch when there are recorded host deploys (most rows
+            // pre-fan-out have empty maps and would just no-op).
+            var hostStatuses = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (r.HostDeployIds.Count > 0)
+            {
+                var perHost = await runsRepo.ListByGroupAsync(r.Id, ct);
+                foreach (var run in perHost)
+                {
+                    hostStatuses[run.Host] = run.Status;
+                }
+            }
+            entries.Add(new
+            {
+                id = r.Id,
+                domain = r.Domain,
+                hosts = r.Hosts,
+                hostDeployIds = r.HostDeployIds,
+                hostStatuses,
+                phase = r.Phase,
+                startedAt = r.StartedAt.ToString("o"),
+                completedAt = r.CompletedAt?.ToString("o"),
+                errorMessage = r.ErrorMessage,
+                triggeredBy = r.TriggeredBy,
+            });
+        }
         return Results.Ok(new { domain, count = entries.Count, entries });
     }
 

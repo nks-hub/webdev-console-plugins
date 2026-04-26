@@ -197,6 +197,17 @@ public sealed class NksDeployGroupCoordinator : IDeployGroupCoordinator
                         Snapshot: req.Snapshot);
                     var deployId = await _backend.StartDeployAsync(hostReq, perHostProgress, ct);
                     await _groups.RecordHostDeployAsync(groupId, host, deployId, ct);
+                    // Phase 6.15b — stamp the group_id FK on the per-host
+                    // run row so ListByGroupAsync can find it. Best-effort
+                    // (a stamp failure here doesn't justify aborting the
+                    // deploy that's already in flight).
+                    try { await _runs.SetGroupIdAsync(deployId, groupId, ct); }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex,
+                            "Group {GroupId} — failed to stamp group_id on deploy {DeployId}",
+                            groupId, deployId);
+                    }
                     var status = await _backend.GetStatusAsync(deployId, ct);
                     return (host, deployId, success: status.Success, error: status.ErrorMessage);
                 }
