@@ -1,0 +1,200 @@
+using System.Text.Json;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using NKS.WebDevConsole.Core.Interfaces;
+using NKS.WebDevConsole.Plugin.SDK.Deploy;
+
+namespace NKS.WebDevConsole.Plugin.NksDeploy;
+
+/// <summary>
+/// REST handlers for the NksDeploy plugin. Registered via the plugin's
+/// <see cref="NksDeployPlugin.RegisterEndpoints"/> override which the
+/// daemon's PluginLoader.WireEndpoints helper hooks into the routing
+/// pipeline under <c>/api/nks.wdc.deploy/</c>. The daemon's Bearer-auth
+/// middleware (matching <c>/api/*</c>) covers them automatically — no
+/// per-handler auth attribute needed.
+///
+/// Path templates use Minimal API route syntax (<c>{domain}</c> etc.); the
+/// final URLs are e.g. <c>/api/nks.wdc.deploy/sites/myapp.loc/hosts/production/deploy</c>.
+/// </summary>
+internal static class NksDeployRoutes
+{
+    /// <summary>
+    /// Body for POST .../deploy. Backend-specific options ride along as a
+    /// freeform JsonElement so future flags (skip-tests, branch override)
+    /// don't need REST-layer changes.
+    /// </summary>
+    public sealed record StartDeployBody(string? IdempotencyKey, JsonElement? Options);
+
+    public static void Register(EndpointRegistration r)
+    {
+        r.MapPost("sites/{domain}/hosts/{host}/deploy", StartDeploy);
+        r.MapGet("sites/{domain}/deploys/{deployId}", GetDeploy);
+        r.MapGet("sites/{domain}/history", GetHistory);
+        r.MapPost("sites/{domain}/deploys/{deployId}/rollback", PostRollback);
+        r.MapDelete("sites/{domain}/deploys/{deployId}", DeleteDeploy);
+    }
+
+    private static async Task<IResult> StartDeploy(
+        string domain,
+        string host,
+        StartDeployBody? body,
+        IDeployBackend backend,
+        IDeployEventBroadcaster broadcaster,
+        ILoggerFactory loggerFactory,
+        HttpContext ctx)
+    {
+        if (!backend.CanDeploy(domain))
+        {
+            return Results.NotFound(new { error = "site_not_deployable", domain });
+        }
+
+        var idempotencyKey = body?.IdempotencyKey ?? Guid.NewGuid().ToString();
+        var optsElement = body?.Options ?? JsonDocument.Parse("{}").RootElement;
+        var request = new DeployRequest(
+            Domain: domain,
+            Host: host,
+            IdempotencyKey: idempotencyKey,
+            TriggeredBy: "gui",
+            BackendOptions: optsElement);
+
+        // IProgress that fans out to SSE so the wdc UI's deploy drawer
+        // updates in real time. The caller is fire-and-forget — we return
+        // 202 immediately with the deployId, then the background task runs
+        // through to the terminal event.
+        var logger = loggerFactory.CreateLogger("NksDeploy.Routes");
+        var progress = new Progress<DeployEvent>(evt =>
+        {
+            // Forward each event onto the daemon's SSE bus. Errors here are
+            // swallowed-and-logged: a failing SSE broadcast must NOT abort
+            // the deploy itself.
+            _ = broadcaster.BroadcastAsync("deploy:event", evt)
+                .ContinueWith(t =>
+                {
+                    if (t.IsFaulted) logger.LogWarning(t.Exception, "SSE broadcast for deploy event failed");
+                }, TaskScheduler.Default);
+        });
+
+        // Pre-mint the deployId so we can return it RIGHT NOW; the background
+        // task does the real work. Use the request lifetime CT — once the
+        // daemon shuts down, in-flight deploys cancel cleanly.
+        var responseTcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var deployId = await backend.StartDeployAsync(request, progress, ctx.RequestAborted);
+                responseTcs.TrySetResult(deployId);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Background deploy failed for {Domain}/{Host}", domain, host);
+                responseTcs.TrySetException(ex);
+            }
+        });
+
+        // We don't await responseTcs.Task — the deployId comes back to the
+        // caller via the IDeployBackend contract: each event carries it.
+        // Instead, we synchesise on a brief grace window (1 sec) for the
+        // backend to mint + INSERT the row so the response carries the id.
+        var idTask = await Task.WhenAny(responseTcs.Task, Task.Delay(TimeSpan.FromSeconds(1)));
+        if (idTask == responseTcs.Task && responseTcs.Task.Status == TaskStatus.RanToCompletion)
+        {
+            return Results.Accepted(value: new { deployId = responseTcs.Task.Result, idempotencyKey });
+        }
+
+        // Couldn't capture id in 1s — return Accepted with a placeholder; the
+        // SSE event stream will carry the real id. For v0.2 this is a known
+        // gap (callers must subscribe to SSE to get the id); v0.3 adds a
+        // synchronous mint-then-spawn split.
+        return Results.Accepted(value: new { deployId = (string?)null, idempotencyKey, note = "deployId arrives via SSE deploy:event" });
+    }
+
+    private static async Task<IResult> GetDeploy(
+        string domain,
+        string deployId,
+        IDeployBackend backend,
+        CancellationToken ct)
+    {
+        try
+        {
+            var result = await backend.GetStatusAsync(deployId, ct);
+            return Results.Ok(result);
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound(new { error = "deploy_not_found", deployId });
+        }
+    }
+
+    private static async Task<IResult> GetHistory(
+        string domain,
+        IDeployBackend backend,
+        CancellationToken ct,
+        int limit = 50)
+    {
+        var entries = await backend.GetHistoryAsync(domain, limit, ct);
+        return Results.Ok(new { domain, count = entries.Count, entries });
+    }
+
+    private static async Task<IResult> PostRollback(
+        string domain,
+        string deployId,
+        IDeployBackend backend,
+        CancellationToken ct)
+    {
+        try
+        {
+            await backend.RollbackAsync(deployId, ct);
+            return Results.Accepted(value: new { sourceDeployId = deployId, status = "rolled_back" });
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound(new { error = "deploy_not_found", deployId });
+        }
+        catch (Exception ex)
+        {
+            return Results.Problem(
+                title: "rollback_failed",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
+
+    private static async Task<IResult> DeleteDeploy(
+        string domain,
+        string deployId,
+        IDeployBackend backend,
+        CancellationToken ct)
+    {
+        try
+        {
+            // Daemon-side gate: refuse if the run has crossed PONR. Reads
+            // straight from the backend's status.
+            var status = await backend.GetStatusAsync(deployId, ct);
+            if (status.FinalPhase is DeployPhase.AboutToSwitch or DeployPhase.Switched
+                or DeployPhase.AwaitingSoak or DeployPhase.HealthCheck)
+            {
+                return Results.Conflict(new
+                {
+                    error = "deploy_past_ponr",
+                    message = "Deploy has crossed point of no return. Use rollback instead of cancel.",
+                    deployId,
+                });
+            }
+
+            await backend.CancelAsync(deployId, ct);
+            return Results.Accepted(value: new { deployId, status = "cancellation_requested" });
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound(new { error = "deploy_not_found", deployId });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Backend says no active deploy — treat as 409 (already terminal).
+            return Results.Conflict(new { error = "deploy_not_active", message = ex.Message, deployId });
+        }
+    }
+}

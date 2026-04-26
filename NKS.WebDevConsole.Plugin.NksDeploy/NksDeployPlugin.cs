@@ -49,4 +49,13 @@ public sealed class NksDeployPlugin : PluginBase
         // the daemon can boot on machines without PHP installed).
         return Task.CompletedTask;
     }
+
+    public override void RegisterEndpoints(EndpointRegistration registration)
+    {
+        // 5 REST endpoints under /api/nks.wdc.deploy/. Auth covered by the
+        // daemon's existing Bearer middleware (it matches /api/*). DI on
+        // each handler resolves IDeployBackend (this plugin's instance) plus
+        // any cross-cutting services like IDeployEventBroadcaster.
+        NksDeployRoutes.Register(registration);
+    }
 }

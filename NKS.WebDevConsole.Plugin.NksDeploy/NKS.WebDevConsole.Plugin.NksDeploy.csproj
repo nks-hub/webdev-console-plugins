@@ -7,6 +7,15 @@
     <RootNamespace>NKS.WebDevConsole.Plugin.NksDeploy</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>
+
+  <!-- Plugin contributes REST endpoints (IResult, HttpContext, Results.Ok …)
+       so it needs the ASP.NET Core framework reference. The daemon already
+       carries this — we use Private=false so the plugin DLL doesn't ship a
+       second copy that would resolve to a different type identity from the
+       host's. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" Private="false" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="CliWrap" Version="3.10.1" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.6" />
