@@ -46,6 +46,9 @@ internal static class NksDeployRoutes
         r.MapPut("sites/{domain}/settings", PutSettings);
         r.MapGet("sites/{domain}/snapshots", ListSnapshots);
         r.MapGet("sites/{domain}/snapshot-info", GetSnapshotInfo);
+        // Phase 6.4 — operator-driven snapshot restore. Destructive — gated
+        // by intent token AND requires an explicit confirm flag in body.
+        r.MapPost("sites/{domain}/snapshots/{deployId}/restore", PostSnapshotRestore);
     }
 
     /// <summary>
@@ -572,4 +575,82 @@ internal static class NksDeployRoutes
 
     private static string SettingsPath(string domain) =>
         Path.Combine(SettingsDir(domain), "deploy-settings.json");
+
+    // ──────────────────────── Phase 6.4 snapshot restore ────────────────────────
+
+    /// <summary>Body for POST .../snapshots/{deployId}/restore.</summary>
+    public sealed record RestoreSnapshotBody(bool Confirm);
+
+    /// <summary>
+    /// Restore the snapshot recorded on a deploy_runs row. Two gates
+    /// enforce the destructive nature: (1) intent token validation
+    /// (kind=restore — see CheckIntentAsync), (2) explicit
+    /// <c>confirm:true</c> in the body so a stray POST cannot trigger
+    /// a live-data overwrite.
+    ///
+    /// SQLite restores create a safety <c>.bak</c> next to the live file
+    /// before overwrite; SQL restores have no such net (operator must
+    /// have a separate DB backup). The endpoint surfaces every failure
+    /// as a structured error rather than a generic 500.
+    /// </summary>
+    private static async Task<IResult> PostSnapshotRestore(
+        string domain,
+        string deployId,
+        RestoreSnapshotBody? body,
+        ISnapshotRestorer restorer,
+        IDeployIntentValidator intentValidator,
+        HttpContext ctx,
+        CancellationToken ct)
+    {
+        if (body is null || !body.Confirm)
+        {
+            return Results.BadRequest(new
+            {
+                error = "confirm_required",
+                message = "Restore is irreversible — POST { \"confirm\": true } to proceed.",
+            });
+        }
+
+        // Snapshot restore is its own intent kind so a deploy/rollback
+        // intent can't be reused to silently overwrite live data. We bind
+        // to the synthetic host marker "*restore*" mirroring the *group*
+        // pattern from Phase 6.1.
+        var rejection = await CheckIntentAsync(ctx, intentValidator, "restore", domain, "*restore*", ct);
+        if (rejection is not null) return rejection;
+
+        try
+        {
+            var result = await restorer.RestoreAsync(domain, deployId, ct);
+            return Results.Ok(new
+            {
+                deployId,
+                domain,
+                mode = result.Mode,
+                bytesProcessed = result.BytesProcessed,
+                durationMs = (long)result.Duration.TotalMilliseconds,
+            });
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound(new { error = "deploy_not_found", deployId });
+        }
+        catch (FileNotFoundException ex)
+        {
+            return Results.NotFound(new { error = "snapshot_archive_missing", message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Domain mismatch / no .env / scaffold archive / missing client
+            // — all surface as 400 because they're caller-resolvable rather
+            // than server faults.
+            return Results.BadRequest(new { error = "restore_refused", message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return Results.Problem(
+                title: "restore_failed",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
 }
