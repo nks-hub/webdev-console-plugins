@@ -165,7 +165,23 @@ public sealed class NksDeployBackend : IDeployBackend
                         active.Pid = started.ProcessId;
                         break;
                     case StandardOutputCommandEvent stdout:
-                        await HandleStdoutLineAsync(deployId, request.Domain, stdout.Text, progress, deployCts.Token);
+                        // Per-line handler failures must not abort the
+                        // event-stream loop — that would orphan the PHP
+                        // subprocess (no exit code processed) and the
+                        // user would see a permanently-running deploy.
+                        try
+                        {
+                            await HandleStdoutLineAsync(deployId, request.Domain, stdout.Text, progress, deployCts.Token);
+                        }
+                        catch (OperationCanceledException) when (deployCts.IsCancellationRequested)
+                        {
+                            throw; // genuine cancel — let the outer catch handle
+                        }
+                        catch (Exception lineEx)
+                        {
+                            _logger.LogWarning(lineEx,
+                                "[{DeployId}] stdout line handler threw; continuing pipeline", deployId);
+                        }
                         break;
                     case StandardErrorCommandEvent stderr when !string.IsNullOrWhiteSpace(stderr.Text):
                         _logger.LogDebug("[{DeployId}] stderr: {Line}", deployId, stderr.Text);
@@ -539,13 +555,28 @@ public sealed class NksDeployBackend : IDeployBackend
             DeployPhase.RolledBack => "rolled_back",
             _ => null,
         };
+        // The DB mirror is best-effort — a SQLite write hiccup (lock
+        // contention with backup, disk-full mid-deploy, etc.) must NOT
+        // abort the live subprocess pipeline. The deploy_runs row will
+        // stay at the previous status; the terminal MarkCompletedAsync in
+        // the outer finally still runs and corrects the final state.
         if (statusForDb is not null)
         {
-            await _runs.UpdateStatusAsync(deployId, statusForDb, ct);
+            try { await _runs.UpdateStatusAsync(deployId, statusForDb, ct); }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "[{DeployId}] mirror UpdateStatusAsync({Status}) failed; continuing", deployId, statusForDb);
+            }
         }
         if (isPastPonr)
         {
-            await _runs.MarkPastPonrAsync(deployId, ct);
+            try { await _runs.MarkPastPonrAsync(deployId, ct); }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "[{DeployId}] mirror MarkPastPonrAsync failed; continuing", deployId);
+            }
         }
 
         progress.Report(new DeployEvent(
