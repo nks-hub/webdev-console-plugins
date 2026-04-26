@@ -38,6 +38,10 @@ public sealed class NksDeployPlugin : PluginBase
         // IDeployBackend from this plugin's container or from the host's via
         // a forwarding registration the daemon adds.
         services.AddSingleton<IDeployBackend, NksDeployBackend>();
+        // Phase 6.1 — multi-host coordinator. Composes the per-host
+        // backend above; lives in this plugin so the SDK contract stays
+        // pluggable for future LocalRsync / Capistrano backends.
+        services.AddSingleton<IDeployGroupCoordinator, NksDeployGroupCoordinator>();
     }
 
     public override Task StartAsync(IPluginContext context, CancellationToken ct)
