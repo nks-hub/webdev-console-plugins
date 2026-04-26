@@ -132,8 +132,16 @@ public sealed class NksDeployBackend : IDeployBackend
 
         try
         {
+            // -d flags MUST precede the script path so PHP applies them
+            // before parsing the phar. Suppresses any startup notices /
+            // warnings the host PHP install might emit (deprecated INI
+            // entries, missing extensions, php.ini paths) — those would
+            // otherwise leak into the NDJSON pipeline as non-JSON lines.
             var args = new List<string>
             {
+                "-d", "display_errors=0",
+                "-d", "error_reporting=0",
+                "-d", "log_errors=0",
                 phar,
                 "deploy",
                 request.Host,
@@ -340,6 +348,9 @@ public sealed class NksDeployBackend : IDeployBackend
             // shows rollback as a single atomic operation).
             var args = new List<string>
             {
+                "-d", "display_errors=0",
+                "-d", "error_reporting=0",
+                "-d", "log_errors=0",
                 phar,
                 "rollback",
                 source.Host,
