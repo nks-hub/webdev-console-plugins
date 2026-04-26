@@ -242,9 +242,115 @@ public sealed class NksDeployBackend : IDeployBackend
         _ => DeployPhase.Queued,
     };
 
-    public Task RollbackAsync(string deployId, CancellationToken ct) =>
-        throw new NotImplementedException(
-            "NksDeployBackend.RollbackAsync — invokes `nksdeploy rollback --yes --format=json`.");
+    public async Task RollbackAsync(string deployId, CancellationToken ct)
+    {
+        // Look up the source deploy to find the host + the release we want
+        // to rewind FROM. The actual target release is "previous" (nksdeploy
+        // resolves it server-side from /releases/), so we don't pass --release
+        // explicitly — just rely on nksdeploy's "default to previous" logic.
+        var source = await _runs.GetByIdAsync(deployId, ct)
+            ?? throw new KeyNotFoundException($"Unknown deploy id: {deployId}");
+
+        var site = _siteRegistry.GetSite(source.Domain)
+            ?? throw new InvalidOperationException($"Site no longer registered: {source.Domain}");
+        var siteRoot = ResolveSiteRoot(site.DocumentRoot);
+        var configPath = Path.Combine(siteRoot, "deploy.neon");
+        if (!File.Exists(configPath))
+        {
+            throw new FileNotFoundException($"deploy.neon not found at {configPath}", configPath);
+        }
+
+        var php = ResolvePhpBinary(site.PhpVersion);
+        var phar = ResolveNksDeployPhar();
+
+        // Rollback gets its own deploy_runs row — separate audit entry, so
+        // the history page shows "deploy → rollback → deploy" as three
+        // distinct events even though they touch the same site/host.
+        var rollbackId = Guid.NewGuid().ToString();
+        var startedAt = DateTimeOffset.UtcNow;
+        await _runs.InsertAsync(new DeployRunRow(
+            Id: rollbackId,
+            Domain: source.Domain,
+            Host: source.Host,
+            ReleaseId: source.ReleaseId,
+            Branch: source.Branch,
+            CommitSha: source.CommitSha,
+            Status: "rolling_back",
+            IsPastPonr: true, // a rollback IS the "past PONR" recovery action
+            StartedAt: startedAt,
+            CompletedAt: null,
+            ExitCode: null,
+            ErrorMessage: null,
+            DurationMs: null,
+            TriggeredBy: "gui",
+            BackendId: BackendId,
+            CreatedAt: startedAt,
+            UpdatedAt: startedAt
+        ), ct);
+
+        var sw = Stopwatch.StartNew();
+        var success = false;
+        int? exitCode = null;
+        string? errorMessage = null;
+
+        try
+        {
+            // Buffered execution — rollback is short and we only need the
+            // final exit code. No NDJSON event stream needed (the wdc UI
+            // shows rollback as a single atomic operation).
+            var args = new List<string>
+            {
+                phar,
+                "rollback",
+                source.Host,
+                "-c", configPath,
+                "--yes",
+                "--format=json",
+            };
+
+            var cmd = await Cli.Wrap(php)
+                .WithArguments(args)
+                .WithWorkingDirectory(siteRoot)
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync(ct);
+
+            exitCode = cmd.ExitCode;
+            success = cmd.ExitCode == 0;
+            if (!success)
+            {
+                errorMessage = $"nksdeploy rollback exit code {cmd.ExitCode}: {cmd.StandardError}";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            errorMessage = "rollback cancelled";
+            await _runs.UpdateStatusAsync(rollbackId, "cancelled", CancellationToken.None);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+            _logger.LogError(ex, "Rollback {RollbackId} (source {SourceId}) threw: {Msg}",
+                rollbackId, deployId, ex.Message);
+        }
+        finally
+        {
+            sw.Stop();
+            // On success: write 'rolled_back' (final state) instead of the
+            // generic 'completed' that MarkCompletedAsync would write.
+            if (success)
+            {
+                await _runs.UpdateStatusAsync(rollbackId, "rolled_back", CancellationToken.None);
+                await _runs.MarkCompletedAsync(rollbackId, true, exitCode, null, sw.ElapsedMilliseconds, CancellationToken.None);
+                // Re-write status because MarkCompletedAsync clobbers it to 'completed'.
+                await _runs.UpdateStatusAsync(rollbackId, "rolled_back", CancellationToken.None);
+            }
+            else
+            {
+                await _runs.MarkCompletedAsync(rollbackId, false, exitCode, errorMessage, sw.ElapsedMilliseconds, CancellationToken.None);
+            }
+        }
+    }
 
     public Task CancelAsync(string deployId, CancellationToken ct)
     {
