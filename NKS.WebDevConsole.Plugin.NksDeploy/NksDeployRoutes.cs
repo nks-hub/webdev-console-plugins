@@ -36,12 +36,58 @@ internal static class NksDeployRoutes
         r.MapDelete("sites/{domain}/deploys/{deployId}", DeleteDeploy);
     }
 
+    /// <summary>
+    /// Common header used by the MCP server to attach a daemon-issued,
+    /// HMAC-signed intent token to a destructive call. Absent header =
+    /// GUI / direct caller; the daemon's bearer-auth still applies.
+    /// </summary>
+    private const string IntentTokenHeader = "X-Intent-Token";
+
+    /// <summary>
+    /// Returns "mcp" when the request carried a valid intent token, "gui"
+    /// otherwise. Drives the deploy_runs.triggered_by column so the audit
+    /// trail and history filter can distinguish AI-initiated deploys.
+    /// </summary>
+    private static string ResolveTriggeredBy(HttpContext ctx)
+        => ctx.Request.Headers.TryGetValue(IntentTokenHeader, out var v) && !string.IsNullOrWhiteSpace(v.ToString())
+            ? "mcp"
+            : "gui";
+
+    /// <summary>
+    /// Validate the intent token (if present) against the (domain, host, kind)
+    /// the plugin is about to act on. Returns null on success; an IResult
+    /// representing the rejection response otherwise. When no token is
+    /// present this is a no-op pass — GUI and direct daemon calls still
+    /// only need bearer auth.
+    /// </summary>
+    private static async Task<IResult?> CheckIntentAsync(
+        HttpContext ctx,
+        IDeployIntentValidator validator,
+        string kind,
+        string domain,
+        string host,
+        CancellationToken ct)
+    {
+        if (!ctx.Request.Headers.TryGetValue(IntentTokenHeader, out var raw)) return null;
+        var token = raw.ToString();
+        if (string.IsNullOrWhiteSpace(token)) return null;
+        var result = await validator.ValidateAndConsumeAsync(token, kind, domain, host, ct);
+        if (!result.Ok)
+        {
+            return Results.Json(
+                new { error = "intent_invalid", reason = result.Reason },
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+        return null;
+    }
+
     private static async Task<IResult> StartDeploy(
         string domain,
         string host,
         StartDeployBody? body,
         IDeployBackend backend,
         IDeployEventBroadcaster broadcaster,
+        IDeployIntentValidator intentValidator,
         ILoggerFactory loggerFactory,
         HttpContext ctx)
     {
@@ -50,13 +96,16 @@ internal static class NksDeployRoutes
             return Results.NotFound(new { error = "site_not_deployable", domain });
         }
 
+        var rejection = await CheckIntentAsync(ctx, intentValidator, "deploy", domain, host, ctx.RequestAborted);
+        if (rejection is not null) return rejection;
+
         var idempotencyKey = body?.IdempotencyKey ?? Guid.NewGuid().ToString();
         var optsElement = body?.Options ?? JsonDocument.Parse("{}").RootElement;
         var request = new DeployRequest(
             Domain: domain,
             Host: host,
             IdempotencyKey: idempotencyKey,
-            TriggeredBy: "gui",
+            TriggeredBy: ResolveTriggeredBy(ctx),
             BackendOptions: optsElement);
 
         // IProgress that fans out to SSE so the wdc UI's deploy drawer
@@ -142,10 +191,22 @@ internal static class NksDeployRoutes
         string domain,
         string deployId,
         IDeployBackend backend,
+        IDeployIntentValidator intentValidator,
+        IDeployRunsRepository runs,
+        HttpContext ctx,
         CancellationToken ct)
     {
         try
         {
+            // Resolve host from the persisted run so the intent token can be
+            // bound to it. Failing here means the run vanished from the DB
+            // — surface as 404 before we touch anything destructive.
+            var run = await runs.GetByIdAsync(deployId, ct);
+            if (run is null) return Results.NotFound(new { error = "deploy_not_found", deployId });
+
+            var rejection = await CheckIntentAsync(ctx, intentValidator, "rollback", domain, run.Host, ct);
+            if (rejection is not null) return rejection;
+
             await backend.RollbackAsync(deployId, ct);
             return Results.Accepted(value: new { sourceDeployId = deployId, status = "rolled_back" });
         }
@@ -166,6 +227,9 @@ internal static class NksDeployRoutes
         string domain,
         string deployId,
         IDeployBackend backend,
+        IDeployIntentValidator intentValidator,
+        IDeployRunsRepository runs,
+        HttpContext ctx,
         CancellationToken ct)
     {
         try
@@ -183,6 +247,14 @@ internal static class NksDeployRoutes
                     deployId,
                 });
             }
+
+            // Validate intent AFTER the PONR gate so AI clients get the same
+            // 409 a GUI user would (cheap to fail-fast on past-PONR; the
+            // intent token can still be re-used until consumed).
+            var run = await runs.GetByIdAsync(deployId, ct);
+            if (run is null) return Results.NotFound(new { error = "deploy_not_found", deployId });
+            var rejection = await CheckIntentAsync(ctx, intentValidator, "cancel", domain, run.Host, ct);
+            if (rejection is not null) return rejection;
 
             await backend.CancelAsync(deployId, ct);
             return Results.Accepted(value: new { deployId, status = "cancellation_requested" });
