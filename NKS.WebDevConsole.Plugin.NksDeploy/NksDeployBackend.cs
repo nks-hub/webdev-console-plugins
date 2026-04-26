@@ -190,13 +190,57 @@ public sealed class NksDeployBackend : IDeployBackend
         return deployId;
     }
 
-    public Task<DeployResult> GetStatusAsync(string deployId, CancellationToken ct) =>
-        throw new NotImplementedException(
-            "NksDeployBackend.GetStatusAsync — reads deploy_runs SQLite row; lands in next commit.");
+    public async Task<DeployResult> GetStatusAsync(string deployId, CancellationToken ct)
+    {
+        var row = await _runs.GetByIdAsync(deployId, ct)
+            ?? throw new KeyNotFoundException($"Unknown deploy id: {deployId}");
 
-    public Task<IReadOnlyList<DeployHistoryEntry>> GetHistoryAsync(string domain, int limit, CancellationToken ct) =>
-        throw new NotImplementedException(
-            "NksDeployBackend.GetHistoryAsync — SSH read of remote /.dep/history.json with 60s local cache.");
+        var phase = StatusToPhase(row.Status);
+        var success = row.Status == "completed";
+        return new DeployResult(
+            DeployId: row.Id,
+            Success: success,
+            ErrorMessage: row.ErrorMessage,
+            StartedAt: row.StartedAt,
+            CompletedAt: row.CompletedAt,
+            ReleaseId: row.ReleaseId,
+            CommitSha: row.CommitSha,
+            FinalPhase: phase);
+    }
+
+    public async Task<IReadOnlyList<DeployHistoryEntry>> GetHistoryAsync(string domain, int limit, CancellationToken ct)
+    {
+        // v0.2 reads the local deploy_runs journal — every deploy this wdc
+        // instance triggered. The richer "merge with remote /.dep/history.json"
+        // path lands in a follow-up so the daemon can show deploys triggered
+        // from another workstation; for now the local journal is the
+        // authoritative view of "what THIS wdc has done".
+        var rows = await _runs.ListForDomainAsync(domain, limit, ct);
+        return rows.Select(r => new DeployHistoryEntry(
+            DeployId: r.Id,
+            Domain: r.Domain,
+            Host: r.Host,
+            Branch: r.Branch ?? "",
+            FinalPhase: StatusToPhase(r.Status),
+            StartedAt: r.StartedAt,
+            CompletedAt: r.CompletedAt,
+            CommitSha: r.CommitSha,
+            ReleaseId: r.ReleaseId,
+            Error: r.ErrorMessage)).ToList();
+    }
+
+    private static DeployPhase StatusToPhase(string status) => status switch
+    {
+        "queued" => DeployPhase.Queued,
+        "running" => DeployPhase.PreflightChecks,
+        "awaiting_soak" => DeployPhase.AwaitingSoak,
+        "completed" => DeployPhase.Done,
+        "failed" => DeployPhase.Failed,
+        "cancelled" => DeployPhase.Cancelled,
+        "rolling_back" => DeployPhase.RollingBack,
+        "rolled_back" => DeployPhase.RolledBack,
+        _ => DeployPhase.Queued,
+    };
 
     public Task RollbackAsync(string deployId, CancellationToken ct) =>
         throw new NotImplementedException(
