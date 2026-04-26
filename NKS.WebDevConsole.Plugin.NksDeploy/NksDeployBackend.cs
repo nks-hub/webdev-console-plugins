@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using CliWrap;
+using CliWrap.Buffered;
 using CliWrap.EventStream;
 using Microsoft.Extensions.Logging;
 using NKS.WebDevConsole.Core.Interfaces;
