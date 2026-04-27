@@ -344,6 +344,95 @@ public sealed class NksDeployBackend : IDeployBackend
     };
 
     /// <summary>
+    /// Phase B (#109-B4) — execute a single hook ad-hoc (no deploy context).
+    /// Used by the GUI/MCP test-hook button to validate hook config before
+    /// it runs in a real deploy. Direct C# implementation — phar isn't
+    /// involved (phar has no hook-test command and would require deploy.neon
+    /// + host context that doesn't apply here).
+    /// </summary>
+    public async Task<(bool ok, long durationMs, string? error)> TestHookAsync(
+        string type, string command, int timeoutSeconds,
+        IReadOnlyDictionary<string, string>? envVars,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(type)) throw new ArgumentException("type required", nameof(type));
+        if (string.IsNullOrWhiteSpace(command)) throw new ArgumentException("command required", nameof(command));
+        var timeout = TimeSpan.FromSeconds(Math.Max(1, timeoutSeconds));
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        using var hookCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        hookCts.CancelAfter(timeout);
+        try
+        {
+            switch (type.ToLowerInvariant())
+            {
+                case "http":
+                    using (var http = new System.Net.Http.HttpClient { Timeout = timeout })
+                    {
+                        var payload = System.Text.Json.JsonSerializer.Serialize(
+                            new { test = true, source = "nksdeploy.test-hook" });
+                        using var req = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, command)
+                        {
+                            Content = new System.Net.Http.StringContent(payload, System.Text.Encoding.UTF8, "application/json"),
+                        };
+                        using var resp = await http.SendAsync(req, hookCts.Token);
+                        if (!resp.IsSuccessStatusCode)
+                            throw new InvalidOperationException(
+                                $"HTTP hook returned {(int)resp.StatusCode} {resp.ReasonPhrase}");
+                    }
+                    break;
+                case "php":
+                    {
+                        var firstToken = command.Split(' ', 2)[0];
+                        var isPath = firstToken.EndsWith(".php", StringComparison.OrdinalIgnoreCase)
+                                     || File.Exists(firstToken);
+                        var args = isPath ? command : $"-r \"{command.Replace("\"", "\\\"")}\"";
+                        await RunHookProcessAsync("php", args, envVars, hookCts.Token);
+                    }
+                    break;
+                case "shell":
+                default:
+                    if (OperatingSystem.IsWindows())
+                        await RunHookProcessAsync("cmd.exe", $"/c {command}", envVars, hookCts.Token);
+                    else
+                        await RunHookProcessAsync("sh", $"-c \"{command.Replace("\"", "\\\"")}\"", envVars, hookCts.Token);
+                    break;
+            }
+            sw.Stop();
+            return (true, sw.ElapsedMilliseconds, null);
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return (false, sw.ElapsedMilliseconds, ex.Message);
+        }
+    }
+
+    private static async Task RunHookProcessAsync(
+        string fileName, string args,
+        IReadOnlyDictionary<string, string>? envVars,
+        CancellationToken ct)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo(fileName, args)
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        if (envVars is not null)
+            foreach (var (k, v) in envVars) psi.EnvironmentVariables[k] = v;
+        using var proc = System.Diagnostics.Process.Start(psi)
+            ?? throw new InvalidOperationException($"Failed to start {fileName}");
+        await proc.WaitForExitAsync(ct);
+        if (proc.ExitCode != 0)
+        {
+            var stderr = await proc.StandardError.ReadToEndAsync(ct);
+            throw new InvalidOperationException(
+                $"{fileName} exit {proc.ExitCode}: {stderr.Trim()}");
+        }
+    }
+
+    /// <summary>
     /// Phase B (#109-B3) — roll back to a specific release ID rather than
     /// the default "previous_release". Wraps the same nksdeploy phar logic
     /// as <see cref="RollbackAsync"/> but appends <c>-r {targetReleaseId}</c>
