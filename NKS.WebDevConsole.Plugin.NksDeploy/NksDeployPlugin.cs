@@ -37,7 +37,12 @@ public sealed class NksDeployPlugin : PluginBase
         // plugin agree on type identity, so the host can resolve
         // IDeployBackend from this plugin's container or from the host's via
         // a forwarding registration the daemon adds.
-        services.AddSingleton<IDeployBackend, NksDeployBackend>();
+        // Plugin-internal route handlers (phase B rollback-to) need the
+        // concrete type to call NksDeployBackend.RollbackToAsync without
+        // changing the SDK contract. Register both: IDeployBackend forwards
+        // to the same singleton via factory.
+        services.AddSingleton<NksDeployBackend>();
+        services.AddSingleton<IDeployBackend>(sp => sp.GetRequiredService<NksDeployBackend>());
         // Phase 6.1 — multi-host coordinator. Composes the per-host
         // backend above; lives in this plugin so the SDK contract stays
         // pluggable for future LocalRsync / Capistrano backends.
