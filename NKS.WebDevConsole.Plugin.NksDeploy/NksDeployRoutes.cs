@@ -59,6 +59,12 @@ internal static class NksDeployRoutes
         // no NksDeployBackend deps. Site-scoped path lets future per-site
         // probe policy (proxy, fallback) attach without breaking callers.
         r.MapPost("test-host-connection", TestHostConnection);
+        // Phase B (#109-B2) — deploy WITHOUT /hosts/{host}/ in path. Host
+        // comes from body or defaults to "production". Mirrors daemon's
+        // /api/nks.wdc.deploy/sites/{domain}/deploy convenience wrapper.
+        // Lets GUI/MCP callers dispatch a deploy with just domain+body
+        // when the operator's per-site default-host is "production".
+        r.MapPost("sites/{domain}/deploy", StartDeployBodyHost);
     }
 
     /// <summary>
@@ -784,6 +790,39 @@ internal static class NksDeployRoutes
                 detail: ex.Message,
                 statusCode: StatusCodes.Status500InternalServerError);
         }
+    }
+
+    /// <summary>
+    /// Body for POST .../deploy (no /hosts/ segment). Same as StartDeployBody
+    /// but adds optional Host field. When absent, defaults to "production"
+    /// — matching the daemon convenience wrapper at Program.cs:3502.
+    /// </summary>
+    public sealed record StartDeployBodyWithHost(
+        string? Host,
+        string? IdempotencyKey,
+        JsonElement? Options,
+        DeploySnapshotOptions? Snapshot = null);
+
+    /// <summary>
+    /// Phase B (#109-B2) — deploy without /hosts/{host}/ in path.
+    /// Reads host from body or defaults "production", then delegates
+    /// to the standard StartDeploy handler with the resolved host.
+    /// </summary>
+    private static Task<IResult> StartDeployBodyHost(
+        string domain,
+        StartDeployBodyWithHost? body,
+        IDeployBackend backend,
+        IDeployEventBroadcaster broadcaster,
+        IDeployIntentValidator intentValidator,
+        ILoggerFactory loggerFactory,
+        HttpContext ctx)
+    {
+        var host = string.IsNullOrWhiteSpace(body?.Host) ? "production" : body.Host;
+        // Re-pack body without Host (StartDeploy gets host from path arg).
+        var inner = body is null
+            ? null
+            : new StartDeployBody(body.IdempotencyKey, body.Options, body.Snapshot);
+        return StartDeploy(domain, host!, inner, backend, broadcaster, intentValidator, loggerFactory, ctx);
     }
 
     /// <summary>
