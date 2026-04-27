@@ -75,6 +75,12 @@ internal static class NksDeployRoutes
         // real deploy. Intent-gated under kind=test_hook because the hook
         // body is arbitrary code execution on the daemon host.
         r.MapPost("sites/{domain}/hooks/test", PostTestHook);
+        // Phase B (#109-B5) — fire a single Slack notification ad-hoc so
+        // operator can verify the configured webhook before a real
+        // deploy:complete fires it. No intent gate — the message body is
+        // canned ("test notification") so this isn't a code-execution
+        // surface, just a network egress to the configured URL.
+        r.MapPost("sites/{domain}/notifications/test", PostTestNotification);
     }
 
     /// <summary>
@@ -948,6 +954,34 @@ internal static class NksDeployRoutes
             durationMs,
             error,
         });
+    }
+
+    /// <summary>
+    /// Body for POST .../notifications/test. <c>SlackWebhook</c> is
+    /// optional — if absent the backend falls back to per-site
+    /// <c>deploy-settings.json</c>'s <c>notifications.slackWebhook</c>.
+    /// </summary>
+    public sealed record TestNotificationBody(
+        string? SlackWebhook,
+        string? Host);
+
+    /// <summary>
+    /// Phase B (#109-B5) — Slack webhook smoke test. Mirrors daemon's
+    /// /api/nks.wdc.deploy/sites/{domain}/notifications/test. Direct C#
+    /// HttpClient post (no phar). Returns the same shape as the daemon
+    /// so the GUI's per-channel "Test" button doesn't branch on backend.
+    /// </summary>
+    private static async Task<IResult> PostTestNotification(
+        string domain,
+        TestNotificationBody? body,
+        NksDeployBackend backend,
+        CancellationToken ct)
+    {
+        var (ok, durationMs, error) = await backend.TestNotificationAsync(
+            domain, body?.Host, body?.SlackWebhook, ct);
+        if (!ok && string.Equals(error, "slack_webhook_not_configured", StringComparison.Ordinal))
+            return Results.BadRequest(new { error });
+        return Results.Json(new { ok, durationMs, error });
     }
 
     private static Task<IResult> StartDeployBodyHost(
