@@ -54,6 +54,11 @@ internal static class NksDeployRoutes
         // Phase 6.6 — on-demand snapshot WITHOUT a deploy. Useful before
         // manual DB ops (large migration via SQL client, schema rename).
         r.MapPost("sites/{domain}/snapshot-now", PostSnapshotNow);
+        // Phase B (#109-B1) — operator utility: TCP-probe a host:port pair.
+        // Used by the host-edit dialog's "Test SSH" button. Pure utility,
+        // no NksDeployBackend deps. Site-scoped path lets future per-site
+        // probe policy (proxy, fallback) attach without breaking callers.
+        r.MapPost("test-host-connection", TestHostConnection);
     }
 
     /// <summary>
@@ -778,6 +783,63 @@ internal static class NksDeployRoutes
                 title: "restore_failed",
                 detail: ex.Message,
                 statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
+
+    /// <summary>
+    /// Phase B (#109-B1) — TCP-probe a host:port. Mirrors daemon's
+    /// /api/nks.wdc.deploy/test-host-connection (Program.cs:2196).
+    /// Pure utility, no NksDeployBackend deps. Used by GUI host-edit
+    /// dialog's "Test SSH" button. 5s timeout, structured result.
+    /// </summary>
+    private static async Task<IResult> TestHostConnection(HttpContext ctx, CancellationToken ct)
+    {
+        using var doc = await JsonDocument.ParseAsync(ctx.Request.Body, cancellationToken: ct);
+        var root = doc.RootElement;
+        var host = root.TryGetProperty("host", out var hEl) ? hEl.GetString() : null;
+        var port = root.TryGetProperty("port", out var pEl) && pEl.TryGetInt32(out var p) ? p : 22;
+
+        if (string.IsNullOrWhiteSpace(host))
+            return Results.BadRequest(new { error = "host is required" });
+        if (port < 1 || port > 65535)
+            return Results.BadRequest(new { error = "port must be in [1, 65535]" });
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        using var probe = new System.Net.Sockets.TcpClient();
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
+        try
+        {
+            await probe.ConnectAsync(host!, port, cts.Token);
+            sw.Stop();
+            return Results.Ok(new { ok = true, latencyMs = sw.ElapsedMilliseconds });
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            sw.Stop();
+            return Results.Ok(new
+            {
+                ok = false, code = "timeout",
+                error = $"TCP probe to {host}:{port} timed out after 5s",
+            });
+        }
+        catch (System.Net.Sockets.SocketException ex)
+        {
+            sw.Stop();
+            return Results.Ok(new
+            {
+                ok = false, code = "socket_error",
+                error = $"{host}:{port} unreachable: {ex.Message}",
+            });
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return Results.Ok(new
+            {
+                ok = false, code = "unexpected",
+                error = ex.Message,
+            });
         }
     }
 }
