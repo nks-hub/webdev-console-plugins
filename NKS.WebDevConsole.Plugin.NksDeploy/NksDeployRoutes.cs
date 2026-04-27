@@ -671,19 +671,41 @@ internal static class NksDeployRoutes
     private static async Task<IResult> PostSnapshotNow(
         string domain,
         IPreDeploySnapshotter snapshotter,
+        NksDeployBackend backend,
         IDeployRunsRepository runs,
         HttpContext ctx,
         CancellationToken ct)
     {
+        // Optional body { host: "..." } — picks a specific host's current/.
+        // No body or no host → first host with localTargetPath wins.
+        string? bodyHost = null;
+        if (ctx.Request.ContentLength is > 0)
+        {
+            try
+            {
+                using var bdoc = await JsonDocument.ParseAsync(ctx.Request.Body, cancellationToken: ct);
+                if (bdoc.RootElement.TryGetProperty("host", out var hEl))
+                    bodyHost = hEl.GetString();
+            }
+            catch { /* empty / non-JSON body is fine */ }
+        }
+
         // Synthetic id for the deploy_runs row — namespaced so reports can
         // distinguish it from real deploys via the prefix.
         var id = Guid.NewGuid().ToString("D");
         var now = DateTimeOffset.UtcNow;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        // Phase C (#109-C1) — try filesystem-ZIP first (matches daemon's
+        // inline snapshot-now behaviour). Falls back to the DB-only
+        // IPreDeploySnapshotter when no host has localTargetPath.
+        var zipResult = await backend.SnapshotCurrentReleaseAsync(domain, bodyHost, id, ct);
+
         var row = new DeployRunRow(
             Id: id,
             Domain: domain,
-            Host: "*manual*",
-            ReleaseId: null,
+            Host: zipResult?.Host ?? "*manual*",
+            ReleaseId: zipResult is not null ? now.ToString("yyyyMMdd_HHmmss") + "-manual" : null,
             Branch: null,
             CommitSha: null,
             Status: "running", // will flip to completed after snapshot succeeds
@@ -698,6 +720,24 @@ internal static class NksDeployRoutes
             CreatedAt: now,
             UpdatedAt: now);
         await runs.InsertAsync(row, ct);
+
+        if (zipResult is not null)
+        {
+            sw.Stop();
+            await runs.UpdatePreDeployBackupAsync(id, zipResult.Value.Path, zipResult.Value.SizeBytes, ct);
+            await runs.MarkCompletedAsync(id,
+                success: true, exitCode: 0, errorMessage: null,
+                durationMs: sw.ElapsedMilliseconds, ct);
+            return Results.Ok(new
+            {
+                snapshotId = id,
+                domain,
+                path = zipResult.Value.Path,
+                sizeBytes = zipResult.Value.SizeBytes,
+                durationMs = sw.ElapsedMilliseconds,
+                host = zipResult.Value.Host,
+            });
+        }
 
         try
         {
