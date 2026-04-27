@@ -344,6 +344,65 @@ public sealed class NksDeployBackend : IDeployBackend
     };
 
     /// <summary>
+    /// Phase B (#109-B5) — fire a single Slack-shaped notification ad-hoc
+    /// so the operator can verify the webhook URL works without waiting
+    /// for a real deploy. <paramref name="webhook"/> is the explicit URL
+    /// (or null to fall back to per-site settings); <paramref name="domain"/>
+    /// is for grant-scoping AND appears in the message body so the test
+    /// post is identifiable. Direct C# (no phar) — phar has no notify
+    /// command.
+    /// </summary>
+    public async Task<(bool ok, long durationMs, string? error)> TestNotificationAsync(
+        string domain, string? host, string? explicitWebhook,
+        CancellationToken ct)
+    {
+        var webhook = explicitWebhook;
+        if (string.IsNullOrWhiteSpace(webhook))
+        {
+            // Fall back to per-site deploy-settings.json (same path as
+            // NksDeployRoutes.SettingsPath). Keep this best-effort: a
+            // missing/corrupt settings file just means "no fallback".
+            try
+            {
+                var sp = Path.Combine(
+                    NKS.WebDevConsole.Core.Services.WdcPaths.SitesRoot,
+                    domain, "deploy-settings.json");
+                if (File.Exists(sp))
+                {
+                    using var sd = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(sp, ct));
+                    if (sd.RootElement.TryGetProperty("notifications", out var nEl)
+                        && nEl.TryGetProperty("slackWebhook", out var swEl))
+                        webhook = swEl.GetString();
+                }
+            }
+            catch { /* best-effort */ }
+        }
+        if (string.IsNullOrWhiteSpace(webhook))
+            return (false, 0, "slack_webhook_not_configured");
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var deployId = "test-" + Guid.NewGuid().ToString("D")[..8];
+            var text = $":bell: *NKS WDC test notification* — site `{domain}` host `{host ?? "test"}` deployId `{deployId}`";
+            var payload = System.Text.Json.JsonSerializer.Serialize(new { text });
+            using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            using var content = new System.Net.Http.StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+            using var resp = await http.PostAsync(webhook, content, ct);
+            sw.Stop();
+            if (!resp.IsSuccessStatusCode)
+                return (false, sw.ElapsedMilliseconds,
+                    $"webhook returned {(int)resp.StatusCode} {resp.ReasonPhrase}");
+            return (true, sw.ElapsedMilliseconds, null);
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return (false, sw.ElapsedMilliseconds, ex.Message);
+        }
+    }
+
+    /// <summary>
     /// Phase B (#109-B4) — execute a single hook ad-hoc (no deploy context).
     /// Used by the GUI/MCP test-hook button to validate hook config before
     /// it runs in a real deploy. Direct C# implementation — phar isn't
