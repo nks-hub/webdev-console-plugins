@@ -65,6 +65,11 @@ internal static class NksDeployRoutes
         // Lets GUI/MCP callers dispatch a deploy with just domain+body
         // when the operator's per-site default-host is "production".
         r.MapPost("sites/{domain}/deploy", StartDeployBodyHost);
+        // Phase B (#109-B3) — rollback to a SPECIFIC release (vs default
+        // "previous_release"). Body must include {targetReleaseId}.
+        // Uses concrete NksDeployBackend.RollbackToAsync — interface stays
+        // clean (no IDeployBackend.RollbackToAsync forced on all backends).
+        r.MapPost("sites/{domain}/deploys/{deployId}/rollback-to", PostRollbackTo);
     }
 
     /// <summary>
@@ -808,6 +813,84 @@ internal static class NksDeployRoutes
     /// Reads host from body or defaults "production", then delegates
     /// to the standard StartDeploy handler with the resolved host.
     /// </summary>
+    /// <summary>
+    /// Body for POST .../rollback-to. <c>TargetReleaseId</c> is required and
+    /// must match an existing release directory under the site's deploy root.
+    /// nksdeploy phar validates the release id; we just forward it via -r.
+    /// </summary>
+    public sealed record RollbackToBody(string? TargetReleaseId);
+
+    /// <summary>
+    /// Phase B (#109-B3) — rollback to a specific release id. Mirrors the
+    /// daemon's /api/nks.wdc.deploy/sites/{domain}/deploys/{deployId}/rollback-to
+    /// endpoint. Uses the plugin-internal concrete NksDeployBackend so the
+    /// IDeployBackend SDK interface doesn't grow a new method.
+    /// </summary>
+    private static async Task<IResult> PostRollbackTo(
+        string domain,
+        string deployId,
+        RollbackToBody? body,
+        NksDeployBackend backend,
+        IDeployIntentValidator intentValidator,
+        IDeployRunsRepository runs,
+        HttpContext ctx,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(body?.TargetReleaseId))
+            return Results.BadRequest(new { error = "targetReleaseId required" });
+
+        try
+        {
+            var run = await runs.GetByIdAsync(deployId, ct);
+            if (run is null) return Results.NotFound(new { error = "deploy_not_found", deployId });
+
+            // Same intent kind as plain rollback — both flip the symlink, both
+            // need operator confirmation. The MCP gate kind is "rollback_to"
+            // server-side; aligning under "rollback" for the validator keeps
+            // existing grants applicable to both shapes.
+            var rejection = await CheckIntentAsync(ctx, intentValidator, "rollback", domain, run.Host, ct);
+            if (rejection is not null) return rejection;
+
+            // Reuse the same in-flight guard as PostRollback — refuse to
+            // start a rollback-to while another deploy/rollback is running
+            // on the same host (race on the symlink swap).
+            var inFlight = await runs.ListInFlightAsync(ct);
+            var conflict = inFlight.FirstOrDefault(r =>
+                string.Equals(r.Domain, domain, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(r.Host, run.Host, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(r.Id, deployId, StringComparison.OrdinalIgnoreCase));
+            if (conflict is not null)
+            {
+                return Results.Conflict(new
+                {
+                    error = "deploy_in_flight",
+                    message = "Another deploy or rollback is currently running on this host. Wait for it to finish or cancel it first.",
+                    blockingDeployId = conflict.Id,
+                    blockingStatus = conflict.Status,
+                });
+            }
+
+            await backend.RollbackToAsync(deployId, body.TargetReleaseId, ct);
+            return Results.Accepted(value: new
+            {
+                sourceDeployId = deployId,
+                targetReleaseId = body.TargetReleaseId,
+                status = "rolled_back",
+            });
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound(new { error = "deploy_not_found", deployId });
+        }
+        catch (Exception ex)
+        {
+            return Results.Problem(
+                title: "rollback_to_failed",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
+
     private static Task<IResult> StartDeployBodyHost(
         string domain,
         StartDeployBodyWithHost? body,
