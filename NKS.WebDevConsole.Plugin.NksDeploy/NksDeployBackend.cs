@@ -37,6 +37,7 @@ public sealed class NksDeployBackend : IDeployBackend
     private readonly ISiteRegistry _siteRegistry;
     private readonly IDeployRunsRepository _runs;
     private readonly IPreDeploySnapshotter? _snapshotter;
+    private readonly IDeployEventBroadcaster? _events;
     private readonly ILogger<NksDeployBackend> _logger;
 
     /// <summary>
@@ -60,11 +61,17 @@ public sealed class NksDeployBackend : IDeployBackend
         ISiteRegistry siteRegistry,
         IDeployRunsRepository runs,
         ILogger<NksDeployBackend> logger,
-        IPreDeploySnapshotter? snapshotter = null)
+        IPreDeploySnapshotter? snapshotter = null,
+        IDeployEventBroadcaster? events = null)
     {
         _siteRegistry = siteRegistry;
         _runs = runs;
         _logger = logger;
+        // Phase C-2 (#109-C2) — broadcaster is optional so older daemons
+        // without the SSE bridge still resolve this backend cleanly. When
+        // present, deploy:hook events flow into the GUI's deploy drawer
+        // for parity with daemon's LocalDeployBackend.
+        _events = events;
         // Snapshotter is optional — older daemons without Phase 6.2 wiring
         // still resolve this backend without binding break. When null,
         // request.Snapshot is silently ignored (logged at debug).
@@ -532,11 +539,48 @@ public sealed class NksDeployBackend : IDeployBackend
                     break;
             }
             sw.Stop();
+            // Phase C-2 (#109-C2) — broadcast deploy:hook for parity with
+            // daemon's LocalDeployBackend.TestHookAsync. deployId is
+            // synthetic ("test-…") so the GUI drawer can highlight ad-hoc
+            // tests separately from real-deploy hooks.
+            if (_events is not null)
+            {
+                try
+                {
+                    await _events.BroadcastAsync("deploy:hook", new
+                    {
+                        deployId = "test-" + Guid.NewGuid().ToString("D")[..8],
+                        evt = "test",
+                        type,
+                        label = command,
+                        ok = true,
+                        durationMs = sw.ElapsedMilliseconds,
+                    });
+                }
+                catch { /* SSE broadcast best-effort */ }
+            }
             return (true, sw.ElapsedMilliseconds, null);
         }
         catch (Exception ex)
         {
             sw.Stop();
+            if (_events is not null)
+            {
+                try
+                {
+                    await _events.BroadcastAsync("deploy:hook", new
+                    {
+                        deployId = "test-" + Guid.NewGuid().ToString("D")[..8],
+                        evt = "test",
+                        type,
+                        label = command,
+                        ok = false,
+                        error = ex.Message,
+                        durationMs = sw.ElapsedMilliseconds,
+                    });
+                }
+                catch { /* SSE broadcast best-effort */ }
+            }
             return (false, sw.ElapsedMilliseconds, ex.Message);
         }
     }
