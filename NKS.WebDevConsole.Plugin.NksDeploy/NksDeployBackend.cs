@@ -344,6 +344,81 @@ public sealed class NksDeployBackend : IDeployBackend
     };
 
     /// <summary>
+    /// Phase C (#109-C1) — ZIP the current/ release directory of the
+    /// resolved host into ~/.wdc/backups/manual/{domain}/{snapshotId}.zip.
+    /// Mirrors daemon's inline snapshot-now logic. Returns null when no
+    /// host has localTargetPath configured (caller falls back to DB
+    /// snapshotter). When the host's current/ is a symlink (nksdeploy
+    /// layout) the archive captures the link target's contents, not the
+    /// symlink metadata.
+    /// </summary>
+    /// <returns>Tuple (zipPath, sizeBytes, host) when a real ZIP was
+    /// written, null when no fs-snapshottable host exists.</returns>
+    public async Task<(string Path, long SizeBytes, string Host)?> SnapshotCurrentReleaseAsync(
+        string domain, string? bodyHost, string snapshotId, CancellationToken ct)
+    {
+        string? sourceCurrent = null;
+        string? hostName = null;
+        try
+        {
+            var settingsPath = System.IO.Path.Combine(
+                NKS.WebDevConsole.Core.Services.WdcPaths.SitesRoot,
+                domain, "deploy-settings.json");
+            if (!File.Exists(settingsPath)) return null;
+            using var sdoc = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(settingsPath, ct));
+            if (!sdoc.RootElement.TryGetProperty("hosts", out var hostsEl)
+                || hostsEl.ValueKind != System.Text.Json.JsonValueKind.Array)
+                return null;
+            foreach (var hEl in hostsEl.EnumerateArray())
+            {
+                if (!hEl.TryGetProperty("name", out var nEl)) continue;
+                var n = nEl.GetString() ?? "";
+                if (!string.IsNullOrEmpty(bodyHost) && !string.Equals(n, bodyHost, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (hEl.TryGetProperty("localTargetPath", out var ltEl))
+                {
+                    var tgt = ltEl.GetString();
+                    if (!string.IsNullOrEmpty(tgt))
+                    {
+                        var candidate = System.IO.Path.Combine(tgt, "current");
+                        if (Directory.Exists(candidate))
+                        {
+                            sourceCurrent = candidate;
+                            hostName = n;
+                            break;
+                        }
+                    }
+                }
+                if (!string.IsNullOrEmpty(bodyHost)) break;
+            }
+        }
+        catch { return null; }
+        if (sourceCurrent is null || hostName is null) return null;
+
+        // Resolve symlink target so the archive captures real files.
+        var realRoot = sourceCurrent;
+        try
+        {
+            var info = new DirectoryInfo(sourceCurrent);
+            if (info.LinkTarget is not null && Directory.Exists(info.LinkTarget))
+                realRoot = info.LinkTarget;
+        }
+        catch { /* keep sourceCurrent */ }
+
+        var backupsDir = System.IO.Path.Combine(
+            NKS.WebDevConsole.Core.Services.WdcPaths.BackupsRoot, "manual", domain);
+        Directory.CreateDirectory(backupsDir);
+        var zipPath = System.IO.Path.Combine(backupsDir, $"{snapshotId}.zip");
+        await Task.Run(() =>
+            System.IO.Compression.ZipFile.CreateFromDirectory(
+                realRoot, zipPath,
+                System.IO.Compression.CompressionLevel.Fastest,
+                includeBaseDirectory: false), ct);
+        var size = new FileInfo(zipPath).Length;
+        return (zipPath, size, hostName);
+    }
+
+    /// <summary>
     /// Phase B (#109-B5) — fire a single Slack-shaped notification ad-hoc
     /// so the operator can verify the webhook URL works without waiting
     /// for a real deploy. <paramref name="webhook"/> is the explicit URL
