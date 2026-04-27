@@ -70,6 +70,11 @@ internal static class NksDeployRoutes
         // Uses concrete NksDeployBackend.RollbackToAsync — interface stays
         // clean (no IDeployBackend.RollbackToAsync forced on all backends).
         r.MapPost("sites/{domain}/deploys/{deployId}/rollback-to", PostRollbackTo);
+        // Phase B (#109-B4) — execute a single hook ad-hoc to validate
+        // the operator's hook config (shell/http/php) before it runs in a
+        // real deploy. Intent-gated under kind=test_hook because the hook
+        // body is arbitrary code execution on the daemon host.
+        r.MapPost("sites/{domain}/hooks/test", PostTestHook);
     }
 
     /// <summary>
@@ -889,6 +894,60 @@ internal static class NksDeployRoutes
                 detail: ex.Message,
                 statusCode: StatusCodes.Status500InternalServerError);
         }
+    }
+
+    /// <summary>
+    /// Body for POST .../hooks/test. Mirrors daemon shape so the GUI's
+    /// per-card "Test" button doesn't need a different request between
+    /// built-in and plugin backends. <c>Type</c> is one of
+    /// shell|http|php; <c>Command</c> is the arbitrary payload (URL for
+    /// http, code/script-path for php, command-line for shell).
+    /// </summary>
+    public sealed record TestHookBody(
+        string? Type,
+        string? Command,
+        int? TimeoutSeconds,
+        IReadOnlyDictionary<string, string>? EnvVars);
+
+    /// <summary>
+    /// Phase B (#109-B4) — ad-hoc hook execution. Mirrors daemon's
+    /// /api/nks.wdc.deploy/sites/{domain}/hooks/test. Direct C# (no phar
+    /// involvement) because phar has no hook-test command and the test
+    /// has no per-deploy context to pass it. Intent-gated under
+    /// kind=test_hook (arbitrary code execution surface). Domain is
+    /// part of the path for grant-scoping; the test itself is site-agnostic.
+    /// </summary>
+    private static async Task<IResult> PostTestHook(
+        string domain,
+        TestHookBody? body,
+        NksDeployBackend backend,
+        IDeployIntentValidator intentValidator,
+        HttpContext ctx,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(body?.Type))
+            return Results.BadRequest(new { error = "type required (shell|http|php)" });
+        if (string.IsNullOrWhiteSpace(body?.Command))
+            return Results.BadRequest(new { error = "command required" });
+
+        // host = domain because there's no per-host scope for ad-hoc hook
+        // tests; the operator approves it for the site as a whole.
+        var rejection = await CheckIntentAsync(ctx, intentValidator, "test_hook", domain, domain, ct);
+        if (rejection is not null) return rejection;
+
+        var (ok, durationMs, error) = await backend.TestHookAsync(
+            body.Type!,
+            body.Command!,
+            body.TimeoutSeconds ?? 5,
+            body.EnvVars,
+            ct);
+
+        return Results.Json(new
+        {
+            ok,
+            durationMs,
+            error,
+        });
     }
 
     private static Task<IResult> StartDeployBodyHost(
