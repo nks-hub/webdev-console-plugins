@@ -343,7 +343,24 @@ public sealed class NksDeployBackend : IDeployBackend
         _ => DeployPhase.Queued,
     };
 
+    /// <summary>
+    /// Phase B (#109-B3) — roll back to a specific release ID rather than
+    /// the default "previous_release". Wraps the same nksdeploy phar logic
+    /// as <see cref="RollbackAsync"/> but appends <c>-r {targetReleaseId}</c>
+    /// to the CLI args. The phar's RollbackCommand already supports this
+    /// via <c>->addOption('release', 'r', ...)</c> (verified iter 51).
+    /// </summary>
+    public Task RollbackToAsync(string deployId, string targetReleaseId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(targetReleaseId))
+            throw new ArgumentException("targetReleaseId required", nameof(targetReleaseId));
+        return RollbackInternalAsync(deployId, targetReleaseId, ct);
+    }
+
     public async Task RollbackAsync(string deployId, CancellationToken ct)
+        => await RollbackInternalAsync(deployId, targetReleaseId: null, ct);
+
+    private async Task RollbackInternalAsync(string deployId, string? targetReleaseId, CancellationToken ct)
     {
         // Look up the source deploy to find the host + the release we want
         // to rewind FROM. The actual target release is "previous" (nksdeploy
@@ -411,6 +428,14 @@ public sealed class NksDeployBackend : IDeployBackend
                 "--yes",
                 "--format=json",
             };
+            // Phase B #109-B3 — when caller supplies a specific target release,
+            // pass it via phar's --release flag (verified iter 51 in
+            // RollbackCommand.php: ->addOption('release', 'r', ...)).
+            if (!string.IsNullOrWhiteSpace(targetReleaseId))
+            {
+                args.Add("-r");
+                args.Add(targetReleaseId);
+            }
 
             var cmd = await Cli.Wrap(php)
                 .WithArguments(args)
