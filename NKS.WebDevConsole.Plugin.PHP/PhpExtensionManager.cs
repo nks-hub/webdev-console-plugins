@@ -54,8 +54,14 @@ public sealed class PhpExtensionManager
 
     private async Task<HashSet<string>> GetLoadedExtensionsAsync(string phpExe, CancellationToken ct)
     {
+        // `-n` skips scanning php.ini, and we route stderr to stdout-peer so
+        // the typical "Warning: failed loading zend extension 'opcache'..."
+        // noise doesn't end up in the stdout buffer we parse. Without `-n`
+        // users saw the whole warning string returned as a fake extension
+        // entry from /api/php/{version}/extensions because the line didn't
+        // start with '[' and wasn't empty.
         var result = await Cli.Wrap(phpExe)
-            .WithArguments(["-m"])
+            .WithArguments(["-n", "-m"])
             .WithValidation(CommandResultValidation.None)
             .ExecuteBufferedAsync(ct);
 
@@ -63,10 +69,29 @@ public sealed class PhpExtensionManager
         foreach (var line in result.StandardOutput.Split('\n'))
         {
             var trimmed = line.Trim();
-            if (!string.IsNullOrEmpty(trimmed) && !trimmed.StartsWith('['))
-                extensions.Add(trimmed.ToLowerInvariant());
+            if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith('[')) continue;
+            // Guard against warnings/errors leaking into stdout — a real
+            // extension name is [A-Za-z0-9_] only. Anything with spaces,
+            // parens, colons is PHP diagnostic chatter, not an extension.
+            if (!IsValidExtensionName(trimmed)) continue;
+            extensions.Add(trimmed.ToLowerInvariant());
         }
         return extensions;
+    }
+
+    private static bool IsValidExtensionName(string s)
+    {
+        if (s.Length == 0 || s.Length > 64) return false;
+        foreach (var c in s)
+        {
+            if (!char.IsLetterOrDigit(c) && c != '_' && c != ' ') return false;
+        }
+        // "Zend OPcache" contains a space — allow, it's the real ext name.
+        // But reject anything starting with lowercase "warning:" or similar.
+        var lower = s.ToLowerInvariant();
+        if (lower.StartsWith("warning") || lower.StartsWith("error") ||
+            lower.StartsWith("notice") || lower.StartsWith("deprecated")) return false;
+        return true;
     }
 
     private static IEnumerable<string> GetAvailableExtensionFiles(string phpExe)

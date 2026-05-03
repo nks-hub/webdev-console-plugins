@@ -22,14 +22,15 @@ public sealed class MySqlConfig
     public string? MysqladminPath { get; set; }
     public string? ConfigFile { get; set; }
     public string LogDirectory { get; set; } = Path.Combine(WdcPaths.LogsRoot, "mysql");
-    // 3307 by default, not 3306: MariaDB is a parallel plugin in WDC and
-    // takes the conventional 3306 slot. Running both on the same port is a
-    // real conflict — on macOS they end up silently binding the same port on
-    // different IP families (mariadbd IPv4, mysqld IPv6) which looks healthy
-    // until a client tries 127.0.0.1 and hits the wrong server. 3307 is the
-    // standard "second MySQL-protocol server" port and keeps test scripts /
-    // connection strings unambiguous.
-    public int Port { get; set; } = 3307;
+    // Default 3306 (standard MySQL port) — previously 3307 because the
+    // MariaDB plugin was enabled-by-default and took 3306; we've since
+    // switched MariaDB to disabled-by-default (alt RDBMS, not the primary
+    // choice). With only one of the two active at any given time, the
+    // conventional 3306 is the least-surprise default — every MySQL client
+    // library's out-of-the-box connection string assumes it. Users who
+    // enable both plugins hit PortConflictDetector and can remap one via
+    // Settings → Porty.
+    public int Port { get; set; } = 3306;
     public int GracefulTimeoutSecs { get; set; } = 30;
 
     /// <summary>
