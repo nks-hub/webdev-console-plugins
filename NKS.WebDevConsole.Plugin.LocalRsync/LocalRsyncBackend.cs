@@ -188,7 +188,7 @@ public sealed class LocalRsyncBackend : IDeployBackend
             .Where(r => r.BackendId == BackendId)
             .Select(r => new DeployHistoryEntry(
                 DeployId: r.Id, Domain: r.Domain, Host: r.Host,
-                Branch: r.Branch ?? "", FinalPhase: DeployPhase.Done,
+                Branch: r.Branch ?? "", FinalPhase: MapStatusToPhase(r.Status),
                 StartedAt: r.StartedAt, CompletedAt: r.CompletedAt,
                 CommitSha: null, ReleaseId: null, Error: r.ErrorMessage))
             .ToList();
@@ -223,4 +223,12 @@ public sealed class LocalRsyncBackend : IDeployBackend
         if (!opts.TryGetProperty("target", out var t)) return null;
         return t.ValueKind == JsonValueKind.String ? t.GetString() : null;
     }
+
+    private static DeployPhase MapStatusToPhase(string status) => status switch
+    {
+        "completed" => DeployPhase.Done,
+        "cancelled" => DeployPhase.Cancelled,
+        "running" => DeployPhase.Building,
+        _ => DeployPhase.Failed,
+    };
 }

@@ -171,7 +171,7 @@ internal static class NksDeployRoutes
         string domain,
         string host,
         StartDeployBody? body,
-        IDeployBackend backend,
+        NksDeployBackend backend,
         IDeployEventBroadcaster broadcaster,
         IDeployIntentValidator intentValidator,
         ILoggerFactory loggerFactory,
@@ -250,7 +250,7 @@ internal static class NksDeployRoutes
     private static async Task<IResult> GetDeploy(
         string domain,
         string deployId,
-        IDeployBackend backend,
+        NksDeployBackend backend,
         CancellationToken ct)
     {
         try
@@ -266,7 +266,7 @@ internal static class NksDeployRoutes
 
     private static async Task<IResult> GetHistory(
         string domain,
-        IDeployBackend backend,
+        NksDeployBackend backend,
         CancellationToken ct,
         int limit = 50)
     {
@@ -277,7 +277,7 @@ internal static class NksDeployRoutes
     private static async Task<IResult> PostRollback(
         string domain,
         string deployId,
-        IDeployBackend backend,
+        NksDeployBackend backend,
         IDeployIntentValidator intentValidator,
         IDeployRunsRepository runs,
         HttpContext ctx,
@@ -334,7 +334,7 @@ internal static class NksDeployRoutes
     private static async Task<IResult> DeleteDeploy(
         string domain,
         string deployId,
-        IDeployBackend backend,
+        NksDeployBackend backend,
         IDeployIntentValidator intentValidator,
         IDeployRunsRepository runs,
         HttpContext ctx,
@@ -1027,7 +1027,7 @@ internal static class NksDeployRoutes
     private static Task<IResult> StartDeployBodyHost(
         string domain,
         StartDeployBodyWithHost? body,
-        IDeployBackend backend,
+        NksDeployBackend backend,
         IDeployEventBroadcaster broadcaster,
         IDeployIntentValidator intentValidator,
         ILoggerFactory loggerFactory,
