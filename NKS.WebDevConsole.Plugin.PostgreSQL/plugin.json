@@ -1,0 +1,12 @@
+{
+  "id": "nks.wdc.postgresql",
+  "name": "PostgreSQL",
+  "version": "1.0.0",
+  "description": "PostgreSQL service module - manages postgres lifecycle with initdb, pg_ctl, pg_isready, generated data directory, and local development defaults.",
+  "author": "NKS Hub",
+  "category": "Databases",
+  "serviceId": "postgresql",
+  "serviceType": "Database",
+  "defaultPort": 5432,
+  "entryAssembly": "NKS.WebDevConsole.Plugin.PostgreSQL.dll"
+}
