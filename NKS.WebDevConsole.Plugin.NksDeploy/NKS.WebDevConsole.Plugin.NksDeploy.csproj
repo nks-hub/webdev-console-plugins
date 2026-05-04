@@ -26,7 +26,7 @@
        the SDK csproj directly so unreleased SDK changes (e.g. the new
        IDeployBackend interface from the integration branch) are picked up
        without waiting for a publish-sdk.yml run. CI without the sibling repo
-       falls back to the Directory.Build.props PackageReference (currently 0.2.4
+       falls back to the Directory.Build.props PackageReference (currently 0.3.1
        — must be bumped to a release containing IDeployBackend before this
        plugin is published from CI). -->
   <ItemGroup Condition="Exists('..\..\nks-ws\src\daemon\NKS.WebDevConsole.Plugin.SDK\NKS.WebDevConsole.Plugin.SDK.csproj')">
