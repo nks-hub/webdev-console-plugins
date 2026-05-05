@@ -266,12 +266,14 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         // corresponding directive is skipped via `{{ if site.xxx }}`.
         var apacheSettings = site.ApacheSettings;
 
+        var aliases = NormalizeAliases(site.Domain, site.Aliases);
         var model = new
         {
             site = new
             {
                 domain = site.Domain,
-                aliases = site.Aliases ?? Array.Empty<string>(),
+                aliases = aliases,
+                bind_address = FormatApacheBindAddress(GetBindAddress(site)),
                 root = site.DocumentRoot,
                 // Parent of the document root — used by the vhost template
                 // to emit an `AllowOverride None` stanza so Apache does not
@@ -391,6 +393,46 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         {
             var parent = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(docRoot));
             return string.IsNullOrEmpty(parent) ? "" : parent;
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    private static string[] NormalizeAliases(string domain, IEnumerable<string>? aliases)
+    {
+        var result = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var alias in aliases ?? Array.Empty<string>())
+        {
+            var value = alias.Trim();
+            if (!string.IsNullOrWhiteSpace(value) && seen.Add(value))
+                result.Add(value);
+        }
+        if (string.Equals(domain, "localhost", StringComparison.OrdinalIgnoreCase)
+            && seen.Add("127.0.0.1"))
+        {
+            result.Add("127.0.0.1");
+        }
+        return result.ToArray();
+    }
+
+    private static string FormatApacheBindAddress(string? bindAddress)
+    {
+        if (string.IsNullOrWhiteSpace(bindAddress) || bindAddress.Trim() == "*")
+            return "*";
+        var value = bindAddress.Trim();
+        if (value.StartsWith('[') && value.EndsWith(']'))
+            return value;
+        return value.Contains(':') ? $"[{value}]" : value;
+    }
+
+    private static string GetBindAddress(SiteConfig site)
+    {
+        try
+        {
+            return site.GetType().GetProperty("BindAddress")?.GetValue(site) as string ?? "";
         }
         catch
         {

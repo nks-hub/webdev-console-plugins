@@ -3,7 +3,7 @@
 
 {{ if site.ssl -}}
 # HTTP → HTTPS redirect
-<VirtualHost *:{{ port }}>
+<VirtualHost {{ site.bind_address }}:{{ port }}>
     ServerName {{ site.domain }}
     {{ if site.aliases && site.aliases.size > 0 -}}
     ServerAlias {{ for a in site.aliases }}{{ a }} {{ end }}
@@ -13,7 +13,7 @@
 </VirtualHost>
 
 # HTTPS VirtualHost
-<VirtualHost *:{{ https_port }}>
+<VirtualHost {{ site.bind_address }}:{{ https_port }}>
     ServerName {{ site.domain }}
     {{ if site.aliases && site.aliases.size > 0 -}}
     ServerAlias {{ for a in site.aliases }}{{ a }} {{ end }}
@@ -121,7 +121,7 @@
 </VirtualHost>
 {{- else -}}
 # HTTP-only VirtualHost
-<VirtualHost *:{{ port }}>
+<VirtualHost {{ site.bind_address }}:{{ port }}>
     ServerName {{ site.domain }}
     {{ if site.aliases && site.aliases.size > 0 -}}
     ServerAlias {{ for a in site.aliases }}{{ a }} {{ end }}
