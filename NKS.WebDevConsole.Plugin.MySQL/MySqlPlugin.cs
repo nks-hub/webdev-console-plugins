@@ -59,6 +59,7 @@ public sealed class MySqlPlugin : IWdcPlugin, IFrontendPanelProvider
         new UiSchemaBuilder(Id)
             .Category("Databases")
             .Icon("el-icon-coin")
+            .AddNavEntry("mysql", "MySQL", "/plugins/mysql", "Coin", order: 20)
             .SetServiceCategory("db", "mysql")
             .AddServiceCard("mysql")
             .AddConfigEditor("mysql")

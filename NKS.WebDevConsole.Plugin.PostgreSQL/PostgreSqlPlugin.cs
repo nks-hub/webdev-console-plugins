@@ -53,6 +53,7 @@ public sealed class PostgreSqlPlugin : IWdcPlugin, IFrontendPanelProvider
         new UiSchemaBuilder(Id)
             .Category("Databases")
             .Icon("el-icon-coin")
+            .AddNavEntry("postgresql", "PostgreSQL", "/plugins/postgresql", "Coin", order: 30)
             .SetServiceCategory("db", "postgresql")
             .AddServiceCard("postgresql")
             .AddConfigEditor("postgresql")
