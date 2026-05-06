@@ -266,14 +266,16 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         // corresponding directive is skipped via `{{ if site.xxx }}`.
         var apacheSettings = site.ApacheSettings;
 
-        var aliases = NormalizeAliases(site.Domain, site.Aliases);
+        var aliases = NormalizeAliases(site);
+        var bindAddresses = EffectiveApacheBindAddresses(site);
         var model = new
         {
             site = new
             {
                 domain = site.Domain,
                 aliases = aliases,
-                bind_address = FormatApacheBindAddress(GetBindAddress(site)),
+                bind_address = bindAddresses[0],
+                bind_addresses = bindAddresses,
                 root = site.DocumentRoot,
                 // Parent of the document root — used by the vhost template
                 // to emit an `AllowOverride None` stanza so Apache does not
@@ -313,8 +315,11 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         };
 
         var result = template.Render(model, m => m.Name);
-        var outPath = Path.Combine(_config.VhostsDirectory, $"{site.Domain}.conf");
+        var outPath = ResolveVhostPath(site.Domain);
         await File.WriteAllTextAsync(outPath, result, ct);
+        var legacyPath = Path.Combine(_config.VhostsDirectory, $"{site.Domain}.conf");
+        if (!string.Equals(outPath, legacyPath, StringComparison.OrdinalIgnoreCase) && File.Exists(legacyPath))
+            File.Delete(legacyPath);
         _logger.LogInformation("Generated vhost for {Domain} at {Path}", site.Domain, outPath);
     }
 
@@ -333,6 +338,24 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         // from a test harness or future API that skips validation).
         // Mirrors nginx fix (commit 8a2e86b, wdc-todo:nginx-path-traversal).
         var baseDir = Path.GetFullPath(_config.VhostsDirectory);
+        var primaryPath = Path.GetFullPath(ResolveVhostPath(domain));
+        var legacyPath = Path.GetFullPath(Path.Combine(baseDir, $"{domain}.conf"));
+        if (!string.Equals(primaryPath, legacyPath, StringComparison.OrdinalIgnoreCase))
+        {
+            if (!primaryPath.StartsWith(baseDir, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning(
+                    "Refused to remove apache vhost outside managed dir - domain='{Domain}' resolved to '{Path}', base '{Base}'",
+                    domain,
+                    primaryPath,
+                    baseDir);
+            }
+            else if (File.Exists(primaryPath))
+            {
+                File.Delete(primaryPath);
+                _logger.LogInformation("Removed vhost for {Domain}", domain);
+            }
+        }
         var requestedPath = Path.GetFullPath(Path.Combine(baseDir, $"{domain}.conf"));
         if (!requestedPath.StartsWith(baseDir, StringComparison.OrdinalIgnoreCase))
         {
@@ -351,6 +374,14 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         }
 
         return Task.CompletedTask;
+    }
+
+    private string ResolveVhostPath(string domain)
+    {
+        var fileName = string.Equals(domain, "localhost", StringComparison.OrdinalIgnoreCase)
+            ? "000-localhost.conf"
+            : $"{domain}.conf";
+        return Path.Combine(_config.VhostsDirectory, fileName);
     }
 
     private static bool HasAnySslCerts()
@@ -400,8 +431,12 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         }
     }
 
-    private static string[] NormalizeAliases(string domain, IEnumerable<string>? aliases)
+    private static string[] NormalizeAliases(SiteConfig site)
     {
+        var domain = site.Domain;
+        var aliases = site.Aliases;
+        var bindAddress = GetBindAddress(site);
+
         var result = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var alias in aliases ?? Array.Empty<string>())
@@ -414,6 +449,14 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             && seen.Add("127.0.0.1"))
         {
             result.Add("127.0.0.1");
+        }
+        var primaryBind = NormalizeBindScope(bindAddress);
+        if (string.Equals(domain, "localhost", StringComparison.OrdinalIgnoreCase)
+            && primaryBind != "*"
+            && !string.Equals(primaryBind, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+            && seen.Add(primaryBind))
+        {
+            result.Add(primaryBind);
         }
         return result.ToArray();
     }
@@ -438,6 +481,33 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         {
             return "";
         }
+    }
+
+    private static string[] EffectiveApacheBindAddresses(SiteConfig site)
+    {
+        var primary = NormalizeBindScope(GetBindAddress(site));
+        var result = new List<string> { primary == "*" ? "*" : FormatApacheBindAddress(primary) };
+
+        if (primary != "*"
+            && string.Equals(site.Domain, "localhost", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(primary, "127.0.0.1", StringComparison.OrdinalIgnoreCase))
+        {
+            // Keep localhost reachable as https://127.0.0.1 without creating an
+            // exact 127.0.0.1 vhost group that would shadow wildcard-bound sites.
+            result.Add("*");
+        }
+
+        return result.ToArray();
+    }
+
+    private static string NormalizeBindScope(string? bindAddress)
+    {
+        if (string.IsNullOrWhiteSpace(bindAddress) || bindAddress.Trim() == "*")
+            return "*";
+        var value = bindAddress.Trim();
+        if (value.StartsWith('[') && value.EndsWith(']'))
+            value = value[1..^1];
+        return System.Net.IPAddress.TryParse(value, out var ip) ? ip.ToString() : value;
     }
 
     private static async Task<string> LoadEmbeddedTemplateAsync(string name)
