@@ -3,6 +3,28 @@
 
 {{ for bind_address in site.bind_addresses -}}
 {{ if site.ssl -}}
+{{ if bind_address != "*" -}}
+# Default deny vhost for this exact listener address. Apache chooses exact
+# address groups before wildcard groups; without this guard, an unknown Host
+# on {{ bind_address }} could fall through to the first real vhost in this file.
+<VirtualHost {{ bind_address }}:{{ port }}>
+    ServerName wdc-unmatched.local
+    <Location />
+        Require all denied
+    </Location>
+</VirtualHost>
+
+<VirtualHost {{ bind_address }}:{{ https_port }}>
+    ServerName wdc-unmatched.local
+    SSLEngine on
+    SSLCertificateFile "{{ site.cert_path | string.replace '\\' '/' }}"
+    SSLCertificateKeyFile "{{ site.key_path | string.replace '\\' '/' }}"
+    <Location />
+        Require all denied
+    </Location>
+</VirtualHost>
+
+{{- end }}
 # HTTP → HTTPS redirect
 <VirtualHost {{ bind_address }}:{{ port }}>
     ServerName {{ site.domain }}
@@ -121,6 +143,18 @@
     ErrorLog "${APACHE_LOG_DIR}/{{ site.domain }}-ssl-error.log"
 </VirtualHost>
 {{- else -}}
+{{ if bind_address != "*" -}}
+# Default deny vhost for this exact listener address. Apache chooses exact
+# address groups before wildcard groups; without this guard, an unknown Host
+# on {{ bind_address }} could fall through to the first real vhost in this file.
+<VirtualHost {{ bind_address }}:{{ port }}>
+    ServerName wdc-unmatched.local
+    <Location />
+        Require all denied
+    </Location>
+</VirtualHost>
+
+{{- end }}
 # HTTP-only VirtualHost
 <VirtualHost {{ bind_address }}:{{ port }}>
     ServerName {{ site.domain }}
