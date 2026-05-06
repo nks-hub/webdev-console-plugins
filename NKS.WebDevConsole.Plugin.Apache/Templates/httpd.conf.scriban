@@ -77,6 +77,11 @@ LoadModule socache_shmcb_module modules/mod_socache_shmcb.so
 ServerAdmin {{ server_admin }}
 ServerName {{ server_name }}
 
+# Local development must allow direct HTTPS access by IP address. Windows
+# Schannel clients do not send SNI for IP literals, and Apache 2.4.64+
+# otherwise returns 421 before the localhost IP vhost can handle the request.
+HttpProtocolOptions Unsafe
+
 # User — only on Unix
 {{ if is_windows }}
 # Windows does not need User/Group directives

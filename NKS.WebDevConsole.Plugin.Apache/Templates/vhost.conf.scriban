@@ -3,7 +3,7 @@
 
 {{ for bind_address in site.bind_addresses -}}
 {{ if site.ssl -}}
-{{ if bind_address != "*" -}}
+{{ if bind_address != "*" && site.domain != "localhost" -}}
 # Default deny vhost for this exact listener address. Apache chooses exact
 # address groups before wildcard groups; without this guard, an unknown Host
 # on {{ bind_address }} could fall through to the first real vhost in this file.
@@ -27,7 +27,7 @@
 {{- end }}
 # HTTP → HTTPS redirect
 <VirtualHost {{ bind_address }}:{{ port }}>
-    ServerName {{ site.domain }}
+    ServerName {{ if site.domain == "localhost" && bind_address != "*" }}{{ bind_address }}{{ else }}{{ site.domain }}{{ end }}
     {{ if site.aliases && site.aliases.size > 0 -}}
     ServerAlias {{ for a in site.aliases }}{{ a }} {{ end }}
     {{- end }}
@@ -37,7 +37,7 @@
 
 # HTTPS VirtualHost
 <VirtualHost {{ bind_address }}:{{ https_port }}>
-    ServerName {{ site.domain }}
+    ServerName {{ if site.domain == "localhost" && bind_address != "*" }}{{ bind_address }}{{ else }}{{ site.domain }}{{ end }}
     {{ if site.aliases && site.aliases.size > 0 -}}
     ServerAlias {{ for a in site.aliases }}{{ a }} {{ end }}
     {{- end }}
@@ -143,7 +143,7 @@
     ErrorLog "${APACHE_LOG_DIR}/{{ site.domain }}-ssl-error.log"
 </VirtualHost>
 {{- else -}}
-{{ if bind_address != "*" -}}
+{{ if bind_address != "*" && site.domain != "localhost" -}}
 # Default deny vhost for this exact listener address. Apache chooses exact
 # address groups before wildcard groups; without this guard, an unknown Host
 # on {{ bind_address }} could fall through to the first real vhost in this file.
@@ -157,7 +157,7 @@
 {{- end }}
 # HTTP-only VirtualHost
 <VirtualHost {{ bind_address }}:{{ port }}>
-    ServerName {{ site.domain }}
+    ServerName {{ if site.domain == "localhost" && bind_address != "*" }}{{ bind_address }}{{ else }}{{ site.domain }}{{ end }}
     {{ if site.aliases && site.aliases.size > 0 -}}
     ServerAlias {{ for a in site.aliases }}{{ a }} {{ end }}
     {{- end }}

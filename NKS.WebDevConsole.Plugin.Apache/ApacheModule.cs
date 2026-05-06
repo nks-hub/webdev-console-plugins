@@ -1,5 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using CliWrap;
 using CliWrap.Buffered;
@@ -523,7 +526,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
     {
         var domain = site.Domain;
         var aliases = site.Aliases;
-        var localhostLoopbackEnabled = GetLocalhostLoopbackEnabled(site);
+        var bindAddresses = GetBindAddresses(site);
 
         var result = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -533,13 +536,22 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             if (!string.IsNullOrWhiteSpace(value) && seen.Add(value))
                 result.Add(value);
         }
-        if (localhostLoopbackEnabled
-            && string.Equals(domain, "localhost", StringComparison.OrdinalIgnoreCase)
-            && seen.Add("127.0.0.1"))
+        if (string.Equals(domain, "localhost", StringComparison.OrdinalIgnoreCase))
         {
-            result.Add("127.0.0.1");
+            AddAlias("127.0.0.1");
+            foreach (var bindAddress in bindAddresses)
+            {
+                if (bindAddress != "*")
+                    AddAlias(bindAddress);
+            }
         }
         return result.ToArray();
+
+        void AddAlias(string value)
+        {
+            if (!string.IsNullOrWhiteSpace(value) && seen.Add(value))
+                result.Add(value);
+        }
     }
 
     private static string ApachePath(string path) => path.Replace('\\', '/');
@@ -600,12 +612,16 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
     private static string[] EffectiveApacheBindAddresses(SiteConfig site)
     {
         var configured = GetBindAddresses(site);
-        var result = configured
+        var effective = configured.Contains("*", StringComparer.OrdinalIgnoreCase)
+            ? configured.Concat(GetWildcardMirrorBindAddresses())
+            : configured;
+
+        var result = effective
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .Select(scope => scope == "*" ? "*" : FormatApacheBindAddress(scope))
             .ToList();
 
-        if (GetLocalhostLoopbackEnabled(site)
-            && !configured.Contains("*", StringComparer.OrdinalIgnoreCase)
+        if (!configured.Contains("*", StringComparer.OrdinalIgnoreCase)
             && string.Equals(site.Domain, "localhost", StringComparison.OrdinalIgnoreCase)
             && !configured.Contains("127.0.0.1", StringComparer.OrdinalIgnoreCase))
         {
@@ -615,6 +631,37 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         }
 
         return result.ToArray();
+    }
+
+    private static IEnumerable<string> GetWildcardMirrorBindAddresses()
+    {
+        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (nic.OperationalStatus != OperationalStatus.Up)
+                continue;
+
+            IPInterfaceProperties props;
+            try
+            {
+                props = nic.GetIPProperties();
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (var unicast in props.UnicastAddresses)
+            {
+                var address = unicast.Address;
+                if (IPAddress.IsLoopback(address))
+                    continue;
+                if (address.AddressFamily is not (AddressFamily.InterNetwork or AddressFamily.InterNetworkV6))
+                    continue;
+                if (address.AddressFamily == AddressFamily.InterNetworkV6 && address.IsIPv6LinkLocal)
+                    continue;
+                yield return address.ToString();
+            }
+        }
     }
 
     private static string[] NormalizeConfiguredBindScopes(IEnumerable<string>? bindAddresses, string? fallback)
