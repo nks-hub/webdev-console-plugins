@@ -27,7 +27,7 @@
 {{- end }}
 # HTTP → HTTPS redirect
 <VirtualHost {{ bind_address }}:{{ port }}>
-    ServerName {{ if site.domain == "localhost" && bind_address != "*" }}{{ bind_address }}{{ else }}{{ site.domain }}{{ end }}
+    ServerName {{ site.domain }}
     {{ if site.aliases && site.aliases.size > 0 -}}
     ServerAlias {{ for a in site.aliases }}{{ a }} {{ end }}
     {{- end }}
@@ -37,7 +37,7 @@
 
 # HTTPS VirtualHost
 <VirtualHost {{ bind_address }}:{{ https_port }}>
-    ServerName {{ if site.domain == "localhost" && bind_address != "*" }}{{ bind_address }}{{ else }}{{ site.domain }}{{ end }}
+    ServerName {{ site.domain }}
     {{ if site.aliases && site.aliases.size > 0 -}}
     ServerAlias {{ for a in site.aliases }}{{ a }} {{ end }}
     {{- end }}
@@ -57,13 +57,11 @@
     # when the offending .htaccess sits two levels up.
     #
     # Apache's <Directory> match is longest-wins, so declaring `/`
-    # as override-free plus the specific docroot as AllowOverride All
-    # (further down) gives users writable .htaccess inside their site
-    # root and NOTHING executed above it. Require all denied is balanced
-    # by the docroot's `Require all granted`.
+    # as override-free stops ancestor .htaccess walking while the specific
+    # docroot below controls access. Do not add a blanket `Require all denied`
+    # here: on Windows it can still deny requests before the docroot grant wins.
     <Directory "/">
         AllowOverride None
-        Require all denied
     </Directory>
 
     SSLEngine on
@@ -81,8 +79,16 @@
         # shows its contents instead of 403. FollowSymLinks + MultiViews
         # are retained from the original template.
         Options Indexes FollowSymLinks MultiViews
+        {{ if site.host_guard_expr != '' -}}
+        AllowOverride None
+        <RequireAll>
+            Require all granted
+            Require expr "{{ site.host_guard_expr }}"
+        </RequireAll>
+        {{- else -}}
         AllowOverride All
         Require all granted
+        {{- end }}
     </Directory>
 
     {{ if site.node_proxy_port > 0 -}}
@@ -157,7 +163,7 @@
 {{- end }}
 # HTTP-only VirtualHost
 <VirtualHost {{ bind_address }}:{{ port }}>
-    ServerName {{ if site.domain == "localhost" && bind_address != "*" }}{{ bind_address }}{{ else }}{{ site.domain }}{{ end }}
+    ServerName {{ site.domain }}
     {{ if site.aliases && site.aliases.size > 0 -}}
     ServerAlias {{ for a in site.aliases }}{{ a }} {{ end }}
     {{- end }}
@@ -177,13 +183,11 @@
     # when the offending .htaccess sits two levels up.
     #
     # Apache's <Directory> match is longest-wins, so declaring `/`
-    # as override-free plus the specific docroot as AllowOverride All
-    # (further down) gives users writable .htaccess inside their site
-    # root and NOTHING executed above it. Require all denied is balanced
-    # by the docroot's `Require all granted`.
+    # as override-free stops ancestor .htaccess walking while the specific
+    # docroot below controls access. Do not add a blanket `Require all denied`
+    # here: on Windows it can still deny requests before the docroot grant wins.
     <Directory "/">
         AllowOverride None
-        Require all denied
     </Directory>
 
     <Directory "{{ site.root | string.replace '\\' '/' }}">
@@ -192,8 +196,16 @@
         # shows its contents instead of 403. FollowSymLinks + MultiViews
         # are retained from the original template.
         Options Indexes FollowSymLinks MultiViews
+        {{ if site.host_guard_expr != '' -}}
+        AllowOverride None
+        <RequireAll>
+            Require all granted
+            Require expr "{{ site.host_guard_expr }}"
+        </RequireAll>
+        {{- else -}}
         AllowOverride All
         Require all granted
+        {{- end }}
     </Directory>
 
     {{ if site.node_proxy_port > 0 -}}

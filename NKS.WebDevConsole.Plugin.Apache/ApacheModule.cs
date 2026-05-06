@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using CliWrap;
 using CliWrap.Buffered;
 using Microsoft.Extensions.Logging;
@@ -273,12 +274,14 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
 
         var aliases = NormalizeAliases(site);
         var bindAddresses = EffectiveApacheBindAddresses(site);
+        var hostGuardExpr = BuildLocalhostHostGuardExpr(site.Domain, aliases);
         var model = new
         {
             site = new
             {
                 domain = site.Domain,
                 aliases = aliases,
+                host_guard_expr = hostGuardExpr,
                 bind_address = bindAddresses[0],
                 bind_addresses = bindAddresses,
                 root = site.DocumentRoot,
@@ -539,10 +542,15 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         if (string.Equals(domain, "localhost", StringComparison.OrdinalIgnoreCase))
         {
             AddAlias("127.0.0.1");
+            AddAlias("::1");
             foreach (var bindAddress in bindAddresses)
             {
                 if (bindAddress != "*")
+                {
                     AddAlias(bindAddress);
+                    if (bindAddress.StartsWith('[') && bindAddress.EndsWith(']'))
+                        AddAlias(bindAddress[1..^1]);
+                }
             }
         }
         return result.ToArray();
@@ -612,56 +620,97 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
     private static string[] EffectiveApacheBindAddresses(SiteConfig site)
     {
         var configured = GetBindAddresses(site);
-        var effective = configured.Contains("*", StringComparer.OrdinalIgnoreCase)
-            ? configured.Concat(GetWildcardMirrorBindAddresses())
-            : configured;
-
-        var result = effective
+        var result = configured
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Select(scope => scope == "*" ? "*" : FormatApacheBindAddress(scope))
             .ToList();
+
+        if (configured.Contains("*", StringComparer.OrdinalIgnoreCase))
+        {
+            foreach (var address in GetWildcardMirrorBindAddresses())
+            {
+                var formatted = FormatApacheBindAddress(address);
+                if (!result.Contains(formatted, StringComparer.OrdinalIgnoreCase))
+                    result.Add(formatted);
+            }
+        }
 
         if (!configured.Contains("*", StringComparer.OrdinalIgnoreCase)
             && string.Equals(site.Domain, "localhost", StringComparison.OrdinalIgnoreCase)
             && !configured.Contains("127.0.0.1", StringComparer.OrdinalIgnoreCase))
         {
-            // Keep localhost reachable as https://127.0.0.1 without creating an
-            // exact 127.0.0.1 vhost group that would shadow wildcard-bound sites.
-            result.Add("*");
+            result.Add("127.0.0.1");
+        }
+        if (!configured.Contains("*", StringComparer.OrdinalIgnoreCase)
+            && string.Equals(site.Domain, "localhost", StringComparison.OrdinalIgnoreCase)
+            && !configured.Contains("::1", StringComparer.OrdinalIgnoreCase))
+        {
+            result.Add("[::1]");
         }
 
         return result.ToArray();
     }
 
-    private static IEnumerable<string> GetWildcardMirrorBindAddresses()
+    private static string[] GetWildcardMirrorBindAddresses()
     {
-        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+        var result = new List<string> { "127.0.0.1", "::1" };
+        try
         {
-            if (nic.OperationalStatus != OperationalStatus.Up)
-                continue;
-
-            IPInterfaceProperties props;
-            try
+            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
             {
-                props = nic.GetIPProperties();
-            }
-            catch
-            {
-                continue;
-            }
-
-            foreach (var unicast in props.UnicastAddresses)
-            {
-                var address = unicast.Address;
-                if (IPAddress.IsLoopback(address))
+                if (nic.OperationalStatus != OperationalStatus.Up)
                     continue;
-                if (address.AddressFamily is not (AddressFamily.InterNetwork or AddressFamily.InterNetworkV6))
-                    continue;
-                if (address.AddressFamily == AddressFamily.InterNetworkV6 && address.IsIPv6LinkLocal)
-                    continue;
-                yield return address.ToString();
+                foreach (var unicast in nic.GetIPProperties().UnicastAddresses)
+                {
+                    var ip = unicast.Address;
+                    if (ip.AddressFamily is not (AddressFamily.InterNetwork or AddressFamily.InterNetworkV6))
+                        continue;
+                    if (IPAddress.IsLoopback(ip) || ip.IsIPv6LinkLocal)
+                        continue;
+                    if (ip.AddressFamily == AddressFamily.InterNetwork)
+                    {
+                        var bytes = ip.GetAddressBytes();
+                        if (bytes.Length == 4 && bytes[0] == 169 && bytes[1] == 254)
+                            continue;
+                    }
+                    result.Add(ip.ToString());
+                }
             }
         }
+        catch
+        {
+            // Keep wildcard sites reachable on loopback even if interface enumeration fails.
+        }
+
+        return result.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static string BuildLocalhostHostGuardExpr(string domain, IEnumerable<string> aliases)
+    {
+        if (!string.Equals(domain, "localhost", StringComparison.OrdinalIgnoreCase))
+            return string.Empty;
+
+        var hosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "localhost",
+            "127.0.0.1",
+            "::1",
+            "[::1]",
+        };
+        foreach (var alias in aliases)
+        {
+            if (string.IsNullOrWhiteSpace(alias))
+                continue;
+            var value = alias.Trim();
+            hosts.Add(value);
+            if (value.StartsWith('[') && value.EndsWith(']'))
+                hosts.Add(value[1..^1]);
+            else if (value.Contains(':'))
+                hosts.Add($"[{value}]");
+        }
+
+        var pattern = string.Join("|", hosts.Select(Regex.Escape));
+        return $"%{{HTTP_HOST}} =~ m#^({pattern})(:[0-9]+)?$#";
     }
 
     private static string[] NormalizeConfiguredBindScopes(IEnumerable<string>? bindAddresses, string? fallback)
