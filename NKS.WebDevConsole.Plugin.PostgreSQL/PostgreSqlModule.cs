@@ -96,16 +96,13 @@ public sealed class PostgreSqlModule : IServiceModule, IAsyncDisposable
                 "-D", _config.DataDir,
                 "-l", LogFile,
                 "-o", $"-p {_config.Port} -h 127.0.0.1",
+                "-w",
+                "-t", "20",
                 "start"
             };
-            var result = await Cli.Wrap(_config.PgCtlPath!)
-                .WithArguments(args)
-                .WithValidation(CommandResultValidation.None)
-                .ExecuteBufferedAsync(ct);
-            PublishBuffered(result);
-
-            if (result.ExitCode != 0)
-                throw new InvalidOperationException($"pg_ctl start exited {result.ExitCode}: {result.StandardError.Trim()}");
+            var exitCode = await RunPgCtlStartAsync(args, ct);
+            if (exitCode != 0)
+                throw new InvalidOperationException($"pg_ctl start exited {exitCode}; see {LogFile}");
 
             await WaitUntilReadyAsync(ct);
             _process = TryAttachPostgresProcess();
@@ -248,6 +245,33 @@ public sealed class PostgreSqlModule : IServiceModule, IAsyncDisposable
         PublishBuffered(result);
         if (result.ExitCode != 0)
             throw new InvalidOperationException($"initdb exited {result.ExitCode}: {result.StandardError.Trim()}");
+    }
+
+    private async Task<int> RunPgCtlStartAsync(string[] args, CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = _config.PgCtlPath!,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (var arg in args)
+            psi.ArgumentList.Add(arg);
+
+        using var process = Process.Start(psi)
+            ?? throw new InvalidOperationException("pg_ctl start failed to launch");
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(30));
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            try { process.Kill(entireProcessTree: true); } catch { /* best effort */ }
+            throw new TimeoutException("pg_ctl start did not exit within 30 seconds");
+        }
+        return process.ExitCode;
     }
 
     private async Task WaitUntilReadyAsync(CancellationToken ct)
