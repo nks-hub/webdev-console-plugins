@@ -88,6 +88,7 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
     private FileSystemWatcher? _logWatcher;
     private CancellationTokenSource? _watcherCts;
     private readonly ConcurrentDictionary<string, long> _logFilePositions = new();
+    private int _disposed;
 
     [DllImport("libc", SetLastError = true)]
     private static extern int kill(int pid, int sig);
@@ -550,7 +551,8 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
 
     private void StopLogFileWatcher()
     {
-        _watcherCts?.Cancel();
+        try { _watcherCts?.Cancel(); }
+        catch (ObjectDisposedException) { /* dispose race — CTS already disposed */ }
         if (_logWatcher is not null)
         {
             _logWatcher.EnableRaisingEvents = false;
@@ -866,6 +868,8 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+
         StopLogFileWatcher();
 
         if (_process is not null && !_process.HasExited)
@@ -876,5 +880,7 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
 
         _process?.Dispose();
         _watcherCts?.Dispose();
+        _watcherCts = null;
+        await ValueTask.CompletedTask;
     }
 }
