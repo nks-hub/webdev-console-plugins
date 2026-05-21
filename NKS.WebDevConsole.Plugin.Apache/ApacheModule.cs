@@ -999,7 +999,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
 
     public async Task ReloadAsync(CancellationToken ct)
     {
-        _logger.LogInformation("Graceful reload of Apache...");
+        _logger.LogInformation("Reloading Apache...");
 
         // Regenerate httpd.conf so a newly-added SSL cert picks up `Listen 443`.
         // HasAnySslCerts() runs at template time; without this, httpd started
@@ -1012,16 +1012,35 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         if (!validation.IsValid)
             throw new InvalidOperationException($"Reload aborted — config invalid: {validation.ErrorMessage}");
 
+        if (OperatingSystem.IsWindows())
+        {
+            // `httpd -k restart` on Windows only signals a *service-installed*
+            // Apache. WDC runs httpd as a plain tracked child process, so
+            // -k restart either no-ops or spawns a rogue second instance.
+            // Worse: even a successful graceful restart leaves mod_fcgid's
+            // already-spawned php-cgi.exe workers alive — so a site's
+            // PHP-version change (FcgidWrapper path) never takes effect and
+            // the old PHP binary keeps serving. A full stop+start force-kills
+            // the whole process tree (httpd + every fcgid worker) and
+            // respawns fresh — the only reliable apply path on Windows.
+            bool wasRunning;
+            lock (_stateLock)
+                wasRunning = _state is ServiceState.Running or ServiceState.Starting;
+            if (wasRunning)
+                await StopAsync(ct);
+            await StartAsync(ct);
+            _logger.LogInformation("Apache reloaded (full restart) successfully");
+            return;
+        }
+
+        // Unix: `httpd -k graceful` reliably recycles mod_fcgid workers.
         // Pass -f + -d so reload addresses *our* httpd instance, not the
         // baked-in default (CI runner path on nks-hub builds, /opt/homebrew
         // on brew binaries). Without these, `httpd -k graceful` on macOS
         // either fails silently or signals the wrong master process and
-        // our vhost changes never get picked up — users had to full-stop
-        // + start to see their new sites.
+        // our vhost changes never get picked up.
         var configPath = ResolveConfigPath();
-        var signalArgs = OperatingSystem.IsWindows()
-            ? new List<string> { "-k", "restart" }
-            : new List<string> { "-k", "graceful" };
+        var signalArgs = new List<string> { "-k", "graceful" };
         if (File.Exists(configPath))
             signalArgs.AddRange(new[] { "-f", configPath });
         if (!string.IsNullOrEmpty(_config.ServerRoot))
