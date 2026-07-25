@@ -9,8 +9,8 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="CliWrap" Version="3.10.1" />
-    <PackageReference Include="Scriban" Version="7.1.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />
+    <PackageReference Include="Scriban" Version="7.2.5" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.8" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Resources\nginx-vhost.scriban" />
