@@ -943,20 +943,34 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
 
         if (OperatingSystem.IsWindows())
         {
-            // Apache Windows: httpd -k stop sends WM_CLOSE to the parent process
+            // `httpd -k stop` only signals a *service-installed* Apache — the
+            // same limitation ReloadAsync documents for `-k restart`. We only
+            // reach this point when WDC owns httpd as a tracked child process
+            // (the _process null-check above returned otherwise), so -k stop is
+            // a guaranteed no-op. Waiting GracefulTimeoutSecs for it to take
+            // effect burned 30s on every site create/delete and then
+            // force-killed anyway — 23 stops, 23 force-kills, zero graceful
+            // exits. Console-signal graceful stop isn't reachable either:
+            // GenerateConsoleCtrlEvent needs CREATE_NEW_PROCESS_GROUP, which
+            // ProcessStartInfo cannot request. So kill the tree directly. The
+            // end state is byte-for-byte what the timeout path produced, just
+            // without the dead wait, and killing the whole tree is what
+            // recycles mod_fcgid's php-cgi workers in the first place.
+            _process.Kill(entireProcessTree: true);
             try
             {
-                await Cli.Wrap(_config.ExecutablePath)
-                    .WithArguments(["-k", "stop"])
-                    .WithValidation(CommandResultValidation.None)
-                    .ExecuteAsync(ct);
+                await _process.WaitForExitAsync(ct);
             }
-            catch (Exception ex)
+            catch (OperationCanceledException)
             {
-                _logger.LogWarning("httpd -k stop failed: {Message}", ex.Message);
+                // Caller cancelled; the kill above already went out.
             }
+
+            _process.Dispose();
+            _process = null;
+            return;
         }
-        else
+
         {
             // Unix: apachectl graceful-stop (waits for in-flight requests)
             try
