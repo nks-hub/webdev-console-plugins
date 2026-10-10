@@ -1,4 +1,4 @@
-# NKS WebDev Console — Plugins
+# NKS WebDev Console Plugins
 
 [![CI](https://github.com/nks-hub/webdev-console-plugins/actions/workflows/ci.yml/badge.svg)](https://github.com/nks-hub/webdev-console-plugins/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/nks-hub/webdev-console-plugins?label=release)](https://github.com/nks-hub/webdev-console-plugins/releases)
@@ -6,21 +6,21 @@
 [![.NET](https://img.shields.io/badge/.NET-9.0-512BD4)](https://dotnet.microsoft.com/)
 [![Plugins](https://img.shields.io/badge/plugins-16-blue)](#plugins)
 
-> Official plugin collection for [NKS WebDev Console](https://github.com/nks-hub/webdev-console). Each plugin ships as an independently versioned `.zip` artifact published to GitHub Releases and indexed through [`wdc-catalog-api`](https://github.com/nks-hub/wdc-catalog-api) so the WDC daemon can install and upgrade plugins at runtime without re-installing the whole app.
+> Official plugins for [NKS WebDev Console](https://github.com/nks-hub/webdev-console). Each plugin ships as an independently versioned `.zip` artifact published to GitHub Releases and indexed through [`wdc-catalog-api`](https://github.com/nks-hub/wdc-catalog-api) so the WDC daemon can install and upgrade plugins at runtime without re-installing the whole app.
 
-**Writing a new plugin?** Start with **[`docs/PLUGIN-API.md`](./docs/PLUGIN-API.md)** — the full `IWdcPlugin` interface reference, SDK helpers, DI + cross-ALC pattern, and a `Hello, plugin!` walkthrough.
+**Writing a new plugin?** Start with **[`docs/PLUGIN-API.md`](./docs/PLUGIN-API.md)**: `IWdcPlugin` interface reference, SDK helpers, DI + cross-ALC pattern, and a `Hello, plugin!` walkthrough.
 
 ## Features
 
-- 🧩 **16 plugins** — Apache, Nginx, Caddy, PHP, MySQL, MariaDB, PostgreSQL, Redis, Mailpit, SSL (mkcert), Composer, Cloudflare, Node, Hosts, NksDeploy, LocalRsync
-- 🧱 **Isolated load contexts** — each plugin runs in its own `AssemblyLoadContext`, preventing DLL version conflicts across plugins
-- 🔌 **REST endpoints per plugin** — every plugin can expose `/api/plugin/<id>/*` with auth + logging provided by the daemon
-- 🎨 **UI contributions** — plugins register sidebar nav entries, dashboard cards, per-site tabs, and config editors via `PluginUiDefinition`
-- 🔄 **Lifecycle hooks** — validate / start / stop / reload for long-running services with built-in health telemetry
-- 📝 **Scriban config generation** — type-safe vhost / php.ini / fpm.conf templating per site
-- 📡 **SSE event stream** — plugins emit metrics, logs and validation progress consumed by the Electron UI
-- 🔍 **Dynamic discovery** — the daemon loads plugin DLLs from its runtime directory at startup
-- 🏷️ **Per-plugin versioning** — shared repo tag (`v0.2.0`) ships atomic plugin bundle; individual `plugin.json` versions allow manifest-schema bumps
+- 🧩 **16 plugins** - Apache, Nginx, Caddy, PHP, MySQL, MariaDB, PostgreSQL, Redis, Mailpit, SSL (mkcert), Composer, Cloudflare, Node, Hosts, NksDeploy, LocalRsync
+- 🧱 **Isolated load contexts** - each plugin runs in its own `AssemblyLoadContext`, so plugins can depend on different DLL versions
+- 🔌 **REST endpoints per plugin** - a plugin can expose `/api/plugin/<id>/*`, mounted by the daemon's reverse proxy with auth + logging
+- 🎨 **UI contributions** - plugins register sidebar nav entries, dashboard cards, per-site tabs, and config editors via `PluginUiDefinition`
+- 🔄 **Lifecycle hooks** - validate / start / stop / reload for long-running service processes (Apache, MySQL, …) with health telemetry
+- 📝 **Scriban config generation** - per-site vhost, php.ini, fpm.conf and cloudflared config from templates
+- 📡 **SSE event stream** - plugins emit metrics, logs and validation progress consumed by the Electron UI
+- 🔍 **Dynamic discovery** - the daemon loads plugin DLLs from its runtime directory at startup
+- 🏷️ **Per-plugin versioning** - a shared repo tag (`v0.2.0`) ships the whole plugin bundle; individual `plugin.json` versions allow manifest-schema bumps
 
 ## Requirements
 
@@ -34,7 +34,7 @@ Plugins are installed through the NKS WebDev Console daemon at runtime. No manua
 
 ### Via the WDC Electron UI
 
-**Settings → Plugins → Install from Catalog** — pick the plugin and version.
+**Settings → Plugins → Install from Catalog**, then pick the plugin and version.
 
 ### Via the WDC CLI
 
@@ -63,41 +63,33 @@ curl -H "Authorization: Bearer $TOKEN" \
 | `NKS.WebDevConsole.Plugin.Cloudflare` | Cloudflare Tunnel integration                | Stable |
 | `NKS.WebDevConsole.Plugin.Composer`   | PHP Composer manager + per-site package UI   | Stable |
 | `NKS.WebDevConsole.Plugin.Hosts`      | `/etc/hosts` editor with WDC-marked section  | Stable |
-| `NKS.WebDevConsole.Plugin.LocalRsync` | Deploy backend publishing a site to a local target via rsync | — |
+| `NKS.WebDevConsole.Plugin.LocalRsync` | Deploy backend publishing a site to a local target via rsync | - |
 | `NKS.WebDevConsole.Plugin.Mailpit`    | Local SMTP → web inbox                       | Stable |
 | `NKS.WebDevConsole.Plugin.MariaDB`    | MariaDB server lifecycle                     | Stable |
 | `NKS.WebDevConsole.Plugin.MySQL`      | MySQL server lifecycle                       | Stable |
 | `NKS.WebDevConsole.Plugin.Nginx`      | Nginx web server                             | Stable |
-| `NKS.WebDevConsole.Plugin.NksDeploy`  | Zero-downtime deployment for Nette apps via the nksdeploy CLI | — |
+| `NKS.WebDevConsole.Plugin.NksDeploy`  | Zero-downtime deployment for Nette apps via the nksdeploy CLI | - |
 | `NKS.WebDevConsole.Plugin.Node`       | Node.js process manager                      | Stable |
 | `NKS.WebDevConsole.Plugin.PHP`        | PHP-FPM per-version manager                  | Stable |
-| `NKS.WebDevConsole.Plugin.PostgreSQL` | PostgreSQL server lifecycle (initdb, pg_ctl, pg_isready) | — |
+| `NKS.WebDevConsole.Plugin.PostgreSQL` | PostgreSQL server lifecycle (initdb, pg_ctl, pg_isready) | - |
 | `NKS.WebDevConsole.Plugin.Redis`      | Redis server lifecycle                       | Stable |
 | `NKS.WebDevConsole.Plugin.SSL`        | mkcert-based local SSL certs                 | Stable |
 
 Each plugin directory has its own `README.md` with plugin-specific manifest metadata, configuration paths, emitted events, and REST endpoints.
 
-## Plugin Capabilities
+## Plugin model
 
-A WDC plugin is a .NET 9 class library that implements `IWdcPlugin` (defined in `NKS.WebDevConsole.Plugin.SDK`). The daemon discovers plugin assemblies at start-up, loads each in its own `AssemblyLoadContext`, and gives the plugin a chance to register services, lifecycle handlers, REST endpoints, and UI contributions.
+A WDC plugin is a .NET 9 class library that implements `IWdcPlugin` (defined in `NKS.WebDevConsole.Plugin.SDK`). The daemon discovers plugin assemblies at start-up, loads each in its own `AssemblyLoadContext`, and lets the plugin register services, lifecycle handlers, REST endpoints, and UI contributions.
 
-**What plugins can do:**
-
-- **Manage a long-running service process** (Apache, MySQL, …) with validate / start / stop / reload lifecycle hooks + health telemetry
-- **Generate configuration** per site via Scriban templates (vhost files, php.ini snippets, cloudflared config, etc.)
-- **Expose REST endpoints** under `/api/plugin/<id>/*` mounted by the daemon's reverse-proxy. Auth + logging come for free.
-- **Contribute UI** — sidebar nav entries, dashboard cards, per-site tabs, config editors — via `PluginUiDefinition`
-- **Emit events** (metrics, logs, validation progress) over SSE that the Electron frontend subscribes to
-
-**What plugins intentionally CANNOT do:**
+Plugins cannot:
 
 - Touch the daemon's SQLite directly (must go through `IPluginContext`)
-- Share state with other plugins outside the well-defined shared types declared in `PluginLoadContext.SharedAssemblies`
-- Run arbitrary code at assembly load — `Initialize` is the earliest lifecycle hook and it runs inside the plugin ALC
+- Share state with other plugins outside the shared types declared in `PluginLoadContext.SharedAssemblies`
+- Run arbitrary code at assembly load: `Initialize` is the earliest lifecycle hook and it runs inside the plugin ALC
 
 ## Security
 
-Plugin DLLs ship unsigned today — verify via SHA-256 on the catalog entry until codesigning lands. Report vulnerabilities privately per [`SECURITY.md`](./SECURITY.md).
+Plugin DLLs ship unsigned. Verify them via SHA-256 on the catalog entry until codesigning lands. Report vulnerabilities privately per [`SECURITY.md`](./SECURITY.md).
 
 ## Development
 
@@ -143,7 +135,7 @@ The `Release` workflow packages every plugin into its own `.zip` and attaches th
 
 ### Versioning
 
-- Every plugin shares the repo-level tag — e.g. tag `v0.2.0` ships `Apache@0.2.0`, `MySQL@0.2.0`, … even when an individual plugin had no code changes. This keeps the downloader logic trivial and makes rollbacks atomic across the fleet.
+- Every plugin shares the repo-level tag: `v0.2.0` ships `Apache@0.2.0`, `MySQL@0.2.0`, … even when a plugin had no code changes. The downloader resolves one version and a rollback reverts all plugins together.
 - Individual plugins MAY bump their internal `plugin.json` version ahead of the next tag to signal breaking changes to the manifest schema; the tag still defines the artifact identity.
 
 ## Contributing
