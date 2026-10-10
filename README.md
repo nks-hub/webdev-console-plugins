@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/nks-hub/webdev-console-plugins?label=release)](https://github.com/nks-hub/webdev-console-plugins/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-9.0-512BD4)](https://dotnet.microsoft.com/)
-[![Plugins](https://img.shields.io/badge/plugins-13-blue)](#plugins)
+[![Plugins](https://img.shields.io/badge/plugins-16-blue)](#plugins)
 
 > Official plugin collection for [NKS WebDev Console](https://github.com/nks-hub/webdev-console). Each plugin ships as an independently versioned `.zip` artifact published to GitHub Releases and indexed through [`wdc-catalog-api`](https://github.com/nks-hub/wdc-catalog-api) so the WDC daemon can install and upgrade plugins at runtime without re-installing the whole app.
 
@@ -12,7 +12,7 @@
 
 ## Features
 
-- 🧩 **13 production plugins** — Apache, Nginx, Caddy, PHP, MySQL, MariaDB, Redis, Mailpit, SSL (mkcert), Composer, Cloudflare, Node, Hosts
+- 🧩 **16 plugins** — Apache, Nginx, Caddy, PHP, MySQL, MariaDB, PostgreSQL, Redis, Mailpit, SSL (mkcert), Composer, Cloudflare, Node, Hosts, NksDeploy, LocalRsync
 - 🧱 **Isolated load contexts** — each plugin runs in its own `AssemblyLoadContext`, preventing DLL version conflicts across plugins
 - 🔌 **REST endpoints per plugin** — every plugin can expose `/api/plugin/<id>/*` with auth + logging provided by the daemon
 - 🎨 **UI contributions** — plugins register sidebar nav entries, dashboard cards, per-site tabs, and config editors via `PluginUiDefinition`
@@ -63,12 +63,15 @@ curl -H "Authorization: Bearer $TOKEN" \
 | `NKS.WebDevConsole.Plugin.Cloudflare` | Cloudflare Tunnel integration                | Stable |
 | `NKS.WebDevConsole.Plugin.Composer`   | PHP Composer manager + per-site package UI   | Stable |
 | `NKS.WebDevConsole.Plugin.Hosts`      | `/etc/hosts` editor with WDC-marked section  | Stable |
+| `NKS.WebDevConsole.Plugin.LocalRsync` | Deploy backend publishing a site to a local target via rsync | — |
 | `NKS.WebDevConsole.Plugin.Mailpit`    | Local SMTP → web inbox                       | Stable |
 | `NKS.WebDevConsole.Plugin.MariaDB`    | MariaDB server lifecycle                     | Stable |
 | `NKS.WebDevConsole.Plugin.MySQL`      | MySQL server lifecycle                       | Stable |
 | `NKS.WebDevConsole.Plugin.Nginx`      | Nginx web server                             | Stable |
+| `NKS.WebDevConsole.Plugin.NksDeploy`  | Zero-downtime deployment for Nette apps via the nksdeploy CLI | — |
 | `NKS.WebDevConsole.Plugin.Node`       | Node.js process manager                      | Stable |
 | `NKS.WebDevConsole.Plugin.PHP`        | PHP-FPM per-version manager                  | Stable |
+| `NKS.WebDevConsole.Plugin.PostgreSQL` | PostgreSQL server lifecycle (initdb, pg_ctl, pg_isready) | — |
 | `NKS.WebDevConsole.Plugin.Redis`      | Redis server lifecycle                       | Stable |
 | `NKS.WebDevConsole.Plugin.SSL`        | mkcert-based local SSL certs                 | Stable |
 
@@ -114,7 +117,7 @@ Each `NKS.WebDevConsole.Plugin.<Name>/bin/Release/net9.0/` directory then contai
 ```
 .
 ├── Directory.Build.props        # shared .NET build props (nullable, warnings)
-├── NKS.WebDevConsole.Plugin.*/  # one directory per plugin (13×)
+├── NKS.WebDevConsole.Plugin.*/  # one directory per plugin (16×)
 │   ├── *.csproj                 # .NET 9 class library
 │   ├── plugin.json              # manifest (id, name, version, ui, permissions)
 │   └── README.md                # plugin-specific docs
