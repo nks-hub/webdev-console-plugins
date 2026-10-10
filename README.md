@@ -1,26 +1,26 @@
+# NKS WebDev Console — Plugins
+
 [![CI](https://github.com/nks-hub/webdev-console-plugins/actions/workflows/ci.yml/badge.svg)](https://github.com/nks-hub/webdev-console-plugins/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/nks-hub/webdev-console-plugins?label=release)](https://github.com/nks-hub/webdev-console-plugins/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-9.0-512BD4)](https://dotnet.microsoft.com/)
 [![Plugins](https://img.shields.io/badge/plugins-13-blue)](#plugins)
 
-# NKS WebDev Console — Plugins
+> Official plugin collection for [NKS WebDev Console](https://github.com/nks-hub/webdev-console). Each plugin ships as an independently versioned `.zip` artifact published to GitHub Releases and indexed through [`wdc-catalog-api`](https://github.com/nks-hub/wdc-catalog-api) so the WDC daemon can install and upgrade plugins at runtime without re-installing the whole app.
 
-Official plugin collection for [NKS WebDev Console](https://github.com/nks-hub/webdev-console). Each plugin ships as an independently versioned `.zip` artifact published to GitHub Releases and indexed through [`wdc-catalog-api`](https://github.com/nks-hub/wdc-catalog-api) so the WDC daemon can install and upgrade plugins at runtime without re-installing the whole app.
-
-> **Writing a new plugin?** Start with **[`docs/PLUGIN-API.md`](./docs/PLUGIN-API.md)** — the full `IWdcPlugin` interface reference, SDK helpers, DI + cross-ALC pattern, and a `Hello, plugin!` walkthrough.
+**Writing a new plugin?** Start with **[`docs/PLUGIN-API.md`](./docs/PLUGIN-API.md)** — the full `IWdcPlugin` interface reference, SDK helpers, DI + cross-ALC pattern, and a `Hello, plugin!` walkthrough.
 
 ## Features
 
-- ✅ **13 production plugins** — Apache, Nginx, Caddy, PHP, MySQL, MariaDB, Redis, Mailpit, SSL (mkcert), Composer, Cloudflare, Node, Hosts
-- ✅ **Isolated load contexts** — each plugin runs in its own `AssemblyLoadContext`, preventing DLL version conflicts across plugins
-- ✅ **REST endpoints per plugin** — every plugin can expose `/api/plugin/<id>/*` with auth + logging provided by the daemon
-- ✅ **UI contributions** — plugins register sidebar nav entries, dashboard cards, per-site tabs, and config editors via `PluginUiDefinition`
-- ✅ **Lifecycle hooks** — validate / start / stop / reload for long-running services with built-in health telemetry
-- ✅ **Scriban config generation** — type-safe vhost / php.ini / fpm.conf templating per site
-- ✅ **SSE event stream** — plugins emit metrics, logs and validation progress consumed by the Electron UI
-- ✅ **Dynamic discovery** — the daemon loads plugin DLLs from its runtime directory at startup
-- ✅ **Per-plugin versioning** — shared repo tag (`v0.2.0`) ships atomic plugin bundle; individual `plugin.json` versions allow manifest-schema bumps
+- 🧩 **13 production plugins** — Apache, Nginx, Caddy, PHP, MySQL, MariaDB, Redis, Mailpit, SSL (mkcert), Composer, Cloudflare, Node, Hosts
+- 🧱 **Isolated load contexts** — each plugin runs in its own `AssemblyLoadContext`, preventing DLL version conflicts across plugins
+- 🔌 **REST endpoints per plugin** — every plugin can expose `/api/plugin/<id>/*` with auth + logging provided by the daemon
+- 🎨 **UI contributions** — plugins register sidebar nav entries, dashboard cards, per-site tabs, and config editors via `PluginUiDefinition`
+- 🔄 **Lifecycle hooks** — validate / start / stop / reload for long-running services with built-in health telemetry
+- 📝 **Scriban config generation** — type-safe vhost / php.ini / fpm.conf templating per site
+- 📡 **SSE event stream** — plugins emit metrics, logs and validation progress consumed by the Electron UI
+- 🔍 **Dynamic discovery** — the daemon loads plugin DLLs from its runtime directory at startup
+- 🏷️ **Per-plugin versioning** — shared repo tag (`v0.2.0`) ships atomic plugin bundle; individual `plugin.json` versions allow manifest-schema bumps
 
 ## Requirements
 
@@ -92,6 +92,10 @@ A WDC plugin is a .NET 9 class library that implements `IWdcPlugin` (defined in 
 - Share state with other plugins outside the well-defined shared types declared in `PluginLoadContext.SharedAssemblies`
 - Run arbitrary code at assembly load — `Initialize` is the earliest lifecycle hook and it runs inside the plugin ALC
 
+## Security
+
+Plugin DLLs ship unsigned today — verify via SHA-256 on the catalog entry until codesigning lands. Report vulnerabilities privately per [`SECURITY.md`](./SECURITY.md).
+
 ## Development
 
 ### Building locally
@@ -141,19 +145,13 @@ The `Release` workflow packages every plugin into its own `.zip` and attaches th
 
 ## Contributing
 
-Contributions are welcome! For major changes please open an issue first.
+Contributions are welcome! For major changes, please open an issue first. Keep `dotnet build` green and add/update the plugin `README.md` if behavior changes. See [`docs/PLUGIN-API.md`](./docs/PLUGIN-API.md) for the plugin interface and [`docs/WRITING-A-PLUGIN.md`](./docs/WRITING-A-PLUGIN.md) for a step-by-step walkthrough.
 
 1. Fork the repository
-2. Create your feature branch (`git checkout -b feat/amazing-feature`)
-3. Keep `dotnet build` green and add/update plugin `README.md` if behavior changes
-4. Commit your changes — one-line conventional commit messages, no AI attribution
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'feat: description'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
-
-See [`docs/PLUGIN-API.md`](./docs/PLUGIN-API.md) for the plugin interface and [`docs/WRITING-A-PLUGIN.md`](./docs/WRITING-A-PLUGIN.md) for a step-by-step walkthrough.
-
-## Security
-
-Plugin DLLs ship unsigned today — verify via SHA-256 on the catalog entry until codesigning lands. Report vulnerabilities privately per [`SECURITY.md`](./SECURITY.md).
 
 ## Support
 
