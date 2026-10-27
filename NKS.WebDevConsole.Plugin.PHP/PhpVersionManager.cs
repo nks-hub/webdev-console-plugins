@@ -32,6 +32,9 @@ public sealed class PhpVersionManager
     /// <summary>Root directory containing per-version PHP installs.</summary>
     public string BinariesRoot { get; }
 
+    /// <summary>FastCGI base port; PHP X.Y gets base + X*10 + Y (9000 gives 8.5 -> 9085).</summary>
+    public int BasePort { get; set; } = 9000;
+
     // Deterministic port map matches plugin.json phpVersionPortMap
     private static readonly Dictionary<string, int> PortMap = new()
     {
@@ -136,8 +139,7 @@ public sealed class PhpVersionManager
                 return null;
 
             var majorMinor = string.Join(".", version.Split('.').Take(2));
-            if (!PortMap.TryGetValue(majorMinor, out var port))
-                port = 9000 + int.Parse(version.Split('.')[0]) * 10 + int.Parse(version.Split('.')[1]);
+            var port = BasePort + int.Parse(version.Split('.')[0]) * 10 + int.Parse(version.Split('.')[1]);
 
             var dir = Path.GetDirectoryName(phpPath)!;
             var fpmExe = FindFpmExecutable(dir, majorMinor);

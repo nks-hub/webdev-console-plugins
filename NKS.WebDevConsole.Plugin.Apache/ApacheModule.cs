@@ -43,6 +43,8 @@ public sealed class ApacheConfig
     public int HttpPort { get; set; } = 80;
     public int HttpsPort { get; set; } = 443;
     public int GracefulTimeoutSecs { get; set; } = 30;
+    /// <summary>FastCGI base port of the PHP plugin (Settings: ports.phpFpmBase); used by proxy:fcgi vhosts.</summary>
+    public int PhpFpmBasePort { get; set; } = 9000;
 }
 
 /// <summary>
@@ -204,13 +206,13 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             throw new InvalidOperationException(
                 $"vhost template parse error: {string.Join(", ", template.Messages)}");
 
-        // PHP version → FastCGI port mapping: 8.4 → 9084, 8.3 → 9083, 8.2 → 9082
-        int phpPort = 9000;
+        // PHP version → FastCGI port, same rule as the PHP plugin: base 9000 gives 8.4 -> 9084.
+        int phpPort = _config.PhpFpmBasePort;
         if (!string.IsNullOrEmpty(site.PhpVersion) && site.PhpVersion != "none")
         {
             var digits = new string(site.PhpVersion.Where(char.IsDigit).ToArray());
             if (digits.Length >= 2 && int.TryParse(digits[..2], out var parsed))
-                phpPort = 9000 + parsed;
+                phpPort = _config.PhpFpmBasePort + parsed;
         }
 
         // Resolve php-cgi.exe from NKS WDC managed binaries: ~/.wdc/binaries/php/{version}/php-cgi.exe

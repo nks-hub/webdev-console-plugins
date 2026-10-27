@@ -22,6 +22,8 @@ public sealed class PhpModuleConfig
     public string RunDirectory { get; set; } = Path.GetTempPath();
     public string LogDirectory { get; set; } = string.Empty;
     public int GracefulTimeoutSecs { get; set; } = 10;
+    /// <summary>FastCGI base port (Settings: ports.phpFpmBase); PHP X.Y listens on base + X*10 + Y.</summary>
+    public int PhpFpmBasePort { get; set; } = 9000;
 }
 
 /// <summary>
@@ -120,6 +122,7 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
 
     public async Task InitializeAsync(CancellationToken ct)
     {
+        _versionManager.BasePort = _config.PhpFpmBasePort;
         _installations = await _versionManager.DetectAllAsync(_config.AppDirectory, ct);
         _logger.LogInformation("PHP module initialized with {Count} version(s): {Versions}",
             _installations.Count,
@@ -217,6 +220,7 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
         // {"app":"php","version":"X"}` triggers a fresh DetectAllAsync so
         // a second install (e.g. user adds PHP 8.4 after 8.3) spawns its
         // FPM pool on next Start. No more per-Start readdir probe (task #9).
+        await ApplyBasePortAsync(ct);
 
         var tasks = _installations
             .Where(p => p.FpmExecutable is not null && !_running.ContainsKey(p.MajorMinor))
@@ -228,6 +232,16 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
             _state = _running.IsEmpty ? ServiceState.Crashed : ServiceState.Running;
 
         _logger.LogInformation("PHP module started {Count} version(s)", _running.Count);
+    }
+
+    /// <summary>Re-detects installations when the daemon changed PhpFpmBasePort; returns true if it did.</summary>
+    private async Task<bool> ApplyBasePortAsync(CancellationToken ct)
+    {
+        if (_versionManager.BasePort == _config.PhpFpmBasePort) return false;
+        _versionManager.BasePort = _config.PhpFpmBasePort;
+        _installations = await _versionManager.DetectAllAsync(_config.AppDirectory, ct);
+        _logger.LogInformation("PHP FastCGI base port is now {Port}", _config.PhpFpmBasePort);
+        return true;
     }
 
     // ── IServiceModule: StopAsync ────────────────────────────────────────────
@@ -249,6 +263,17 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
         var validation = await ValidateConfigAsync(ct);
         if (!validation.IsValid)
             throw new InvalidOperationException($"PHP config validation failed: {validation.ErrorMessage}");
+
+        // A new base port means new listen ports, which a graceful reload cannot change.
+        if (await ApplyBasePortAsync(ct))
+        {
+            if (!_running.IsEmpty)
+            {
+                await StopAsync(ct);
+                await StartAsync(ct);
+            }
+            return;
+        }
 
         foreach (var (version, running) in _running)
         {
@@ -583,7 +608,7 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
 
         var tag = php.MajorMinor.Replace(".", "");
         var socketPath = Path.Combine(_config.RunDirectory, $"php{tag}-fpm.sock");
-        var fcgiPort = php.FcgiPort > 0 ? php.FcgiPort : 9000;
+        var fcgiPort = php.FcgiPort > 0 ? php.FcgiPort : _config.PhpFpmBasePort;
 
         var scriptObj = new ScriptObject();
         scriptObj.Import(new
