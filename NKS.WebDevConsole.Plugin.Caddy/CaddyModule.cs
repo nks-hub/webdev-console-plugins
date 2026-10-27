@@ -152,6 +152,8 @@ public sealed class CaddyModule : IServiceModule, IAsyncDisposable
         // toggled off. Wrap the whole body so ANY exception resets state.
         try
         {
+            // The binary may have been installed after InitializeAsync ran.
+            DetectCaddyExecutable();
             if (string.IsNullOrEmpty(_config.ExecutablePath))
                 throw new InvalidOperationException("caddy executable not found.");
 

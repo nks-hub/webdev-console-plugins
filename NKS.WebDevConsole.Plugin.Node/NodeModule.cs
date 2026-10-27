@@ -203,6 +203,9 @@ public sealed class NodeModule : IServiceModule, IAsyncDisposable
     /// </summary>
     public async Task StartSiteAsync(string domain, string documentRoot, int port, string startCommand, CancellationToken ct)
     {
+        // The binary may have been installed after InitializeAsync ran.
+        if (_nodeExecutable is null)
+            DetectNodeExecutable();
         if (_nodeExecutable is null)
             throw new InvalidOperationException("Node.js executable not found.");
 

@@ -108,7 +108,9 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
         if (_config.ApplyOwnBinaryDefaults())
         {
             _logger.LogInformation("MySQL binary detected: {Path}", _config.ExecutablePath);
-            await EnsureDataDirInitializedAsync(ct);
+            // Already logged; StartAsync retries and reports it to the user.
+            try { await EnsureDataDirInitializedAsync(ct); }
+            catch (InvalidOperationException) { }
         }
         else
         {
@@ -126,6 +128,17 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
     /// (set on the running instance later by <see cref="SetRootPasswordIfNeededAsync"/>).
     /// </summary>
     private async Task EnsureDataDirInitializedAsync(CancellationToken ct)
+    {
+        // The BinaryInstalled handler runs this in the background; a Start that
+        // arrives meanwhile must wait for it instead of killing the init mysqld.
+        await _initLock.WaitAsync(ct);
+        try { await InitializeDataDirAsync(ct); }
+        finally { _initLock.Release(); }
+    }
+
+    private readonly SemaphoreSlim _initLock = new(1, 1);
+
+    private async Task InitializeDataDirAsync(CancellationToken ct)
     {
         var ibdata = Path.Combine(_config.DataDir, "ibdata1");
         var mysqlSystemDb = Path.Combine(_config.DataDir, "mysql");
@@ -151,6 +164,7 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
         var isMariaDB = File.Exists(mariaInit);
 
         Directory.CreateDirectory(_config.DataDir);
+        var wasEmpty = !Directory.EnumerateFileSystemEntries(_config.DataDir).Any();
 
         BufferedCommandResult result;
         if (isMariaDB)
@@ -183,6 +197,22 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
         {
             _logger.LogError("MySQL data-dir init failed (exit {Code}): {Err}",
                 result.ExitCode, result.StandardError.Trim());
+            // A half-written system schema would pass the "initialized" check
+            // above and crash every later start, so drop what this run created.
+            if (wasEmpty)
+            {
+                try
+                {
+                    Directory.Delete(_config.DataDir, recursive: true);
+                    Directory.CreateDirectory(_config.DataDir);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not clean up the partial MySQL data dir {Path}", _config.DataDir);
+                }
+            }
+            throw new InvalidOperationException(
+                $"MySQL data directory could not be initialized (exit {result.ExitCode}). See the MySQL log for details.");
         }
     }
 
@@ -285,6 +315,9 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
             var validation = await ValidateConfigAsync(ct);
             if (!validation.IsValid)
                 throw new InvalidOperationException($"Config validation failed: {validation.ErrorMessage}");
+
+            // Must run before EnsureDefaultMyIni: --initialize needs an empty data dir.
+            await EnsureDataDirInitializedAsync(ct);
 
             // Ensure a my.ini exists in the data directory so the Service
             // Config UI has something to render (and the user can tweak

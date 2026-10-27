@@ -114,6 +114,8 @@ public sealed class MailpitModule : IServiceModule, IAsyncDisposable
         // Envelope: early throws must reset _state so Dashboard toggle stays live.
         try
         {
+            // The binary may have been installed after InitializeAsync ran.
+            DetectMailpitExecutable();
             if (string.IsNullOrEmpty(_config.ExecutablePath))
                 throw new InvalidOperationException("mailpit executable not found.");
 
