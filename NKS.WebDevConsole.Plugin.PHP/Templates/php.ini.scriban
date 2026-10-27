@@ -58,7 +58,9 @@ xdebug.log={{ xdebug_log }}
 
 ; OPcache
 {{ if opcache_enabled -}}
+{{ if opcache_shared -}}
 zend_extension=opcache
+{{ end -}}
 opcache.enable=1
 opcache.enable_cli=0
 opcache.memory_consumption=128

@@ -72,6 +72,9 @@ public sealed class PhpIniManager
             xdebug_port = opts.XdebugPort,
             xdebug_log = $"/tmp/xdebug-php{opts.Version.Replace(".", "")}.log",
             opcache_enabled = opts.OpcacheEnabled && !opts.XdebugEnabled,
+            // PHP 8.5+ builds opcache in; loading it again fails at every start.
+            opcache_shared = File.Exists(Path.Combine(opts.ExtDir,
+                OperatingSystem.IsWindows() ? "php_opcache.dll" : "opcache.so")),
             opcache_revalidate_freq = isDev ? 0 : 60,
             opcache_validate_timestamps = isDev ? 1 : 0,
             extensions = exts
