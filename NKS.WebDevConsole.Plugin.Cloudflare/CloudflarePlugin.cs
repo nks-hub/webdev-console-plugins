@@ -28,7 +28,7 @@ public sealed class CloudflarePlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.cloudflare";
     public string DisplayName => "Cloudflare Tunnel";
-    public string Version => "1.0.0";
+    public string Version => "1.0.2";
 
     private CloudflareModule? _module;
 

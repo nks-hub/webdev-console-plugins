@@ -60,6 +60,15 @@ jobs:
             if [ ! -f "$readme" ]; then
               echo "::warning file=$dir::$name missing README.md"
             fi
+            # The app shows the Version constant, the release uses plugin.json.
+            if [ -f "$manifest" ]; then
+              json_ver=$(jq -r .version "$manifest")
+              code_ver=$(grep -ho 'Version => "[^"]*"' "$dir"*Plugin.cs | head -1 | cut -d'"' -f2)
+              if [ -n "$code_ver" ] && [ "$json_ver" != "$code_ver" ]; then
+                echo "::error file=$manifest::$name plugin.json version $json_ver differs from Version => \"$code_ver\""
+                missing=$((missing+1))
+              fi
+            fi
           done
           if [ $missing -gt 0 ]; then
             echo "::error::$missing structural issues found"

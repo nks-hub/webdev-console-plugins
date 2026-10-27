@@ -22,7 +22,7 @@ public sealed class ComposerPlugin : IWdcPlugin
 {
     public string Id => "nks.wdc.composer";
     public string DisplayName => "Composer";
-    public string Version => "1.0.0";
+    public string Version => "1.0.2";
 
     public string Description =>
         "PHP dependency manager — per-site composer.json/lock management, " +

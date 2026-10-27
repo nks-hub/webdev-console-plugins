@@ -82,18 +82,20 @@ public sealed class ComposerInvoker
     /// Runs <c>composer install --no-interaction</c> in <paramref name="siteRoot"/>.
     /// </summary>
     /// <param name="siteRoot">Absolute path to the site whose <c>composer.json</c> should be processed.</param>
+    /// <param name="phpPathOverride">PHP interpreter for this site; null uses <see cref="ComposerConfig.PhpPath"/>.</param>
     /// <param name="ct">Cancellation token.</param>
-    public Task<ComposerCommandResult> InstallAsync(string siteRoot, CancellationToken ct = default)
-        => RunAsync(siteRoot, ["install"], ct);
+    public Task<ComposerCommandResult> InstallAsync(string siteRoot, string? phpPathOverride = null, CancellationToken ct = default)
+        => RunAsync(siteRoot, ["install"], phpPathOverride, ct);
 
     /// <summary>
     /// Runs <c>composer require &lt;package&gt; --no-interaction</c> in <paramref name="siteRoot"/>.
     /// </summary>
     /// <param name="siteRoot">Absolute path to the site root.</param>
     /// <param name="package">Package name (and optional version constraint) to require, e.g. <c>nette/application:^3.2</c>.</param>
+    /// <param name="phpPathOverride">PHP interpreter for this site; null uses <see cref="ComposerConfig.PhpPath"/>.</param>
     /// <param name="ct">Cancellation token.</param>
-    public Task<ComposerCommandResult> RequireAsync(string siteRoot, string package, CancellationToken ct = default)
-        => RunAsync(siteRoot, ["require", package], ct);
+    public Task<ComposerCommandResult> RequireAsync(string siteRoot, string package, string? phpPathOverride = null, CancellationToken ct = default)
+        => RunAsync(siteRoot, ["require", package], phpPathOverride, ct);
 
     /// <summary>
     /// Generic escape hatch — runs Composer with an arbitrary argv in <paramref name="siteRoot"/>.
@@ -101,13 +103,15 @@ public sealed class ComposerInvoker
     /// </summary>
     /// <param name="siteRoot">Absolute path to the site root.</param>
     /// <param name="argv">Composer sub-command and flags, e.g. <c>["update", "--prefer-dist"]</c>.</param>
+    /// <param name="phpPathOverride">PHP interpreter for this site; null uses <see cref="ComposerConfig.PhpPath"/>.</param>
     /// <param name="ct">Cancellation token.</param>
     public Task<ComposerCommandResult> RunAsync(
         string siteRoot,
         IReadOnlyList<string> argv,
+        string? phpPathOverride = null,
         CancellationToken ct = default)
     {
-        var (executable, args) = BuildInvocation(argv);
+        var (executable, args) = BuildInvocation(argv, phpPathOverride);
         return _runner.RunAsync(executable, args, siteRoot, ct);
     }
 
@@ -124,7 +128,7 @@ public sealed class ComposerInvoker
     ///   executable = ExecutablePath
     ///   arguments  = [...argv, --no-interaction]
     /// </summary>
-    private (string Executable, IReadOnlyList<string> Args) BuildInvocation(IReadOnlyList<string> argv)
+    private (string Executable, IReadOnlyList<string> Args) BuildInvocation(IReadOnlyList<string> argv, string? phpPathOverride)
     {
         var pharPath = _config.ExecutablePath
             ?? throw new InvalidOperationException(
@@ -136,7 +140,7 @@ public sealed class ComposerInvoker
         if (pharPath.EndsWith(".phar", StringComparison.OrdinalIgnoreCase))
         {
             // Invoke via PHP interpreter: php composer.phar <argv> --no-interaction
-            executable = _config.PhpPath;
+            executable = string.IsNullOrEmpty(phpPathOverride) ? _config.PhpPath : phpPathOverride;
             args.Add(pharPath);
         }
         else
