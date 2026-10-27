@@ -206,7 +206,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             throw new InvalidOperationException(
                 $"vhost template parse error: {string.Join(", ", template.Messages)}");
 
-        // PHP version → FastCGI port, same rule as the PHP plugin: base 9000 gives 8.4 -> 9084.
+        // PHP version -> FastCGI port, same rule as the PHP plugin: base 9000 gives 8.4 -> 9084.
         int phpPort = _config.PhpFpmBasePort;
         if (!string.IsNullOrEmpty(site.PhpVersion) && site.PhpVersion != "none")
         {
