@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using CliWrap;
 using CliWrap.Buffered;
@@ -1155,6 +1157,31 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
 
     private readonly ConcurrentDictionary<string, long> _logFilePositions = new();
 
+    private static readonly Encoding Utf8Strict = new UTF8Encoding(false, throwOnInvalidBytes: true);
+    private static Encoding? _ansiEncoding;
+
+    /// <summary>
+    /// Decodes one log line. Apache writes request data as UTF-8 but Windows
+    /// error texts in the ANSI code page (cp1250 on Czech Windows), so a line
+    /// that is not valid UTF-8 is decoded with the system ANSI code page.
+    /// </summary>
+    internal static string DecodeLogLine(byte[] buf, int start, int count)
+    {
+        try
+        {
+            return Utf8Strict.GetString(buf, start, count);
+        }
+        catch (DecoderFallbackException)
+        {
+            if (_ansiEncoding is null)
+            {
+                Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+                _ansiEncoding = Encoding.GetEncoding(CultureInfo.CurrentCulture.TextInfo.ANSICodePage);
+            }
+            return _ansiEncoding.GetString(buf, start, count);
+        }
+    }
+
     private void TailLogFile(string path)
     {
         try
@@ -1164,15 +1191,19 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             if (pos > fs.Length) pos = 0; // file was rotated
             fs.Seek(pos, SeekOrigin.Begin);
 
-            using var reader = new StreamReader(fs);
-            string? line;
-            while ((line = reader.ReadLine()) is not null)
+            var buf = new byte[fs.Length - pos];
+            var read = fs.ReadAtLeast(buf, buf.Length, throwOnEndOfStream: false);
+            var lineStart = 0;
+            for (var i = 0; i < read; i++)
             {
-                PublishLog($"[{Path.GetFileName(path)}] {line}");
-                pos = fs.Position;
+                if (buf[i] != (byte)'\n') continue;
+                var end = i > lineStart && buf[i - 1] == (byte)'\r' ? i - 1 : i;
+                PublishLog($"[{Path.GetFileName(path)}] {DecodeLogLine(buf, lineStart, end - lineStart)}");
+                lineStart = i + 1;
             }
 
-            _logFilePositions[path] = pos;
+            // A line Apache is still writing stays unread until the next change.
+            _logFilePositions[path] = pos + lineStart;
         }
         catch (Exception ex)
         {
