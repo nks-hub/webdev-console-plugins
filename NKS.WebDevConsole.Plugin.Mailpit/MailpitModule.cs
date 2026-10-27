@@ -278,7 +278,7 @@ public sealed class MailpitModule : IServiceModule, IAsyncDisposable
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-            var response = await http.GetAsync($"http://localhost:{_config.WebPort}/api/v1/info", ct);
+            var response = await http.GetAsync($"http://127.0.0.1:{_config.WebPort}/api/v1/info", ct);
             return response.IsSuccessStatusCode;
         }
         catch
@@ -394,7 +394,8 @@ public sealed class MailpitModule : IServiceModule, IAsyncDisposable
 
     private ProcessStartInfo BuildStartInfo()
     {
-        var args = $"--smtp 0.0.0.0:{_config.SmtpPort} --listen 0.0.0.0:{_config.WebPort}";
+        // Loopback only: Mailpit has no login, so 0.0.0.0 exposed captured mail to the LAN.
+        var args = $"--smtp 127.0.0.1:{_config.SmtpPort} --listen 127.0.0.1:{_config.WebPort}";
 
         return new ProcessStartInfo
         {
@@ -417,7 +418,7 @@ public sealed class MailpitModule : IServiceModule, IAsyncDisposable
         {
             try
             {
-                var response = await http.GetAsync($"http://localhost:{port}/api/v1/info", cts.Token);
+                var response = await http.GetAsync($"http://127.0.0.1:{port}/api/v1/info", cts.Token);
                 if (response.IsSuccessStatusCode)
                     return true;
             }
