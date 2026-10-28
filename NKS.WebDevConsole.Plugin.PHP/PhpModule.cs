@@ -131,7 +131,30 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
             _installations.Count,
             string.Join(", ", _installations.Select(x => x.Version)));
 
-        // Generate php.ini for all detected versions
+        await WriteIniFilesAsync(ct);
+
+        await _aliasManager.CreateAllShimsAsync(
+            _installations, _config.ShimDirectory, _config.ConfigBaseDirectory, ct);
+    }
+
+    /// <summary>Mailpit port the current php.ini files were rendered with.</summary>
+    private int _renderedMailPort;
+
+    /// <summary>
+    /// The daemon sets MailSmtpPort after InitializeAsync, so a non-default port
+    /// only reaches php.ini when Start/Reload re-renders it here.
+    /// </summary>
+    private async Task<bool> ApplyMailPortAsync(CancellationToken ct)
+    {
+        if (_renderedMailPort == _config.MailSmtpPort) return false;
+        await WriteIniFilesAsync(ct);
+        return true;
+    }
+
+    /// <summary>Generates php.ini (all variants plus the copy next to php.exe) for every detected version.</summary>
+    private async Task WriteIniFilesAsync(CancellationToken ct)
+    {
+        _renderedMailPort = _config.MailSmtpPort;
         foreach (var php in _installations)
         {
             var defaultExts = _extensionManager.GetDefaultEnabledExtensions(php);
@@ -187,9 +210,6 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
                     php.Version, ex.Message);
             }
         }
-
-        await _aliasManager.CreateAllShimsAsync(
-            _installations, _config.ShimDirectory, _config.ConfigBaseDirectory, ct);
     }
 
     // ── IServiceModule: ValidateConfigAsync ─────────────────────────────────
@@ -226,6 +246,7 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
         // a second install (e.g. user adds PHP 8.4 after 8.3) spawns its
         // FPM pool on next Start. No more per-Start readdir probe (task #9).
         await ApplyBasePortAsync(ct);
+        await ApplyMailPortAsync(ct);
 
         var tasks = _installations
             .Where(p => p.FpmExecutable is not null && !_running.ContainsKey(p.MajorMinor))
@@ -292,6 +313,9 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
             }
             return;
         }
+
+        // The per-version reload below makes running processes read the new php.ini.
+        await ApplyMailPortAsync(ct);
 
         foreach (var (version, running) in _running)
         {

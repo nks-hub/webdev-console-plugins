@@ -17,7 +17,7 @@ public sealed class PhpPlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.php";
     public string DisplayName => "PHP (Multi-version)";
-    public string Version => "1.0.15";
+    public string Version => "1.0.16";
 
     private PhpModule? _module;
     private PhpVersionManager? _versionManager;
