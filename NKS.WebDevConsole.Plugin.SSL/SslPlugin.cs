@@ -2,18 +2,33 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NKS.WebDevConsole.Core.Interfaces;
+using NKS.WebDevConsole.Core.Models;
 using NKS.WebDevConsole.Core.Services;
+using NKS.WebDevConsole.Plugin.SDK;
 
 namespace NKS.WebDevConsole.Plugin.SSL;
 
 /// <summary>
 /// IWdcPlugin entry point for SSL certificate management via mkcert.
 /// </summary>
-public sealed class SslPlugin : IWdcPlugin
+public sealed class SslPlugin : IWdcPlugin, IFrontendPanelProvider
 {
+    /// <summary>Dashboard shortcut to the SSL page; labelKey lets the app translate it.</summary>
+    public PluginUiDefinition GetUiDefinition() =>
+        new UiSchemaBuilder(Id)
+            .Category("Tools")
+            .ContributeQuickAction("nav-link-button", new()
+            {
+                ["label"] = "SSL certificates",
+                ["labelKey"] = "dashboard.quickActions.ssl",
+                ["route"] = "/ssl",
+                ["icon"] = "Lock",
+            }, order: 20)
+            .Build();
+
     public string Id => "nks.wdc.ssl";
     public string DisplayName => "SSL (mkcert)";
-    public string Version => "1.0.2";
+    public string Version => "1.0.3";
 
     private MkcertManager? _mkcert;
     private ILogger? _logger;
