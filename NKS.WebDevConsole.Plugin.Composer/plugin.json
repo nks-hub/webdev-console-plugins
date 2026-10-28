@@ -1,7 +1,7 @@
 {
   "id": "nks.wdc.composer",
   "displayName": "Composer",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "PHP dependency manager — per-site composer.json/lock management, framework auto-install, runs under the active PHP version. Manages versioned composer.phar files under ~/.wdc/binaries/composer/ with automatic semver-ordered discovery and PATH fallback. Stateless CLI tool — no daemon process.",
   "author": "NKS",
   "license": "Apache-2.0",

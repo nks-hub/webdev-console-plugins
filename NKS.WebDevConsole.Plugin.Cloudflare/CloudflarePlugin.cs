@@ -28,7 +28,7 @@ public sealed class CloudflarePlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.cloudflare";
     public string DisplayName => "Cloudflare Tunnel";
-    public string Version => "1.0.2";
+    public string Version => "1.0.3";
 
     private CloudflareModule? _module;
 
@@ -66,6 +66,9 @@ public sealed class CloudflarePlugin : IWdcPlugin, IFrontendPanelProvider
                 ["serviceId"] = "cloudflare",
                 ["title"] = "Tunnel & DNS",
             })
+            // Per-site tunnel settings and the tunnel chip in the sites table.
+            .ContributeSiteEditTab("cloudflare-site-tab", new() { ["name"] = "cloudflare", ["label"] = "Cloudflare" }, order: 40)
+            .ContributeSitesBadge("cloudflare-tunnel-badge", new(), order: 10)
             .Build();
 
     /// <inheritdoc />

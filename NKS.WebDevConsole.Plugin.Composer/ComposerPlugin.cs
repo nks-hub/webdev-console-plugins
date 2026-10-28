@@ -1,6 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NKS.WebDevConsole.Core.Interfaces;
+using NKS.WebDevConsole.Core.Models;
+using NKS.WebDevConsole.Plugin.SDK;
 
 namespace NKS.WebDevConsole.Plugin.Composer;
 
@@ -18,11 +20,11 @@ namespace NKS.WebDevConsole.Plugin.Composer;
 /// (newest version wins by semver), then falls back to the system <c>composer</c>
 /// shim on PATH if no managed phar is present.
 /// </summary>
-public sealed class ComposerPlugin : IWdcPlugin
+public sealed class ComposerPlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.composer";
     public string DisplayName => "Composer";
-    public string Version => "1.0.2";
+    public string Version => "1.0.3";
 
     public string Description =>
         "PHP dependency manager — per-site composer.json/lock management, " +
@@ -61,4 +63,11 @@ public sealed class ComposerPlugin : IWdcPlugin
     }
 
     public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
+
+    /// <summary>Adds the per-site Composer tab to the site page; no nav entry or panels.</summary>
+    public PluginUiDefinition GetUiDefinition() =>
+        new UiSchemaBuilder(Id)
+            .Category("Tools")
+            .ContributeSiteEditTab("composer-site-tab", new() { ["name"] = "composer", ["label"] = "Composer" }, order: 60)
+            .Build();
 }
