@@ -178,7 +178,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             vhosts_dir = _config.VhostsDirectory,
         };
 
-        var result = template.Render(model, member => member.Name);
+        var result = CompactConfig(template.Render(model, member => member.Name));
         await File.WriteAllTextAsync(_config.ConfigFile, result, ct);
         await EnsureDefaultVhostAsync(ct);
         _logger.LogInformation("Generated httpd.conf at {Path}", _config.ConfigFile);
@@ -326,7 +326,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             php_cgi_path = phpCgiPath,
         };
 
-        var result = template.Render(model, m => m.Name);
+        var result = CompactConfig(template.Render(model, m => m.Name));
         var outPath = ResolveVhostPath(site);
         await File.WriteAllTextAsync(outPath, result, ct);
         foreach (var stalePath in ResolveStaleVhostPaths(site.Domain, outPath))
@@ -858,6 +858,14 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             if (!validation.IsValid)
                 throw new InvalidOperationException($"Config validation failed: {validation.ErrorMessage}");
 
+            // WDC stops httpd by killing its tree on Windows, which leaves logs/httpd.pid
+            // behind; httpd then logs "Unclean shutdown of previous Apache run" on every start.
+            if (!string.IsNullOrEmpty(_config.ServerRoot))
+            {
+                try { File.Delete(Path.Combine(_config.ServerRoot, "logs", "httpd.pid")); }
+                catch (IOException ex) { _logger.LogDebug("Stale httpd.pid not removed: {Message}", ex.Message); }
+            }
+
             var psi = BuildStartInfo();
             _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
 
@@ -1155,6 +1163,31 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         }
 
         _logger.LogDebug("Log watchers started on {Dir}", logDir);
+    }
+
+    /// <summary>
+    /// Drops the template's maintainer comments and repeated blank lines from a
+    /// rendered config. Apache only has whole-line comments, so removing them never
+    /// changes behaviour; the leading header comment block is kept.
+    /// </summary>
+    internal static string CompactConfig(string text)
+    {
+        var lines = text.Split('\n');
+        var output = new List<string>(lines.Length);
+        var inHeader = true;
+        foreach (var line in lines)
+        {
+            var trimmed = line.TrimStart();
+            if (trimmed.StartsWith('#'))
+            {
+                if (inHeader) output.Add(line.TrimEnd());
+                continue;
+            }
+            inHeader = false;
+            if (trimmed.Length == 0 && (output.Count == 0 || output[^1].Trim().Length == 0)) continue;
+            output.Add(line.TrimEnd());
+        }
+        return string.Join(Environment.NewLine, output).TrimEnd() + Environment.NewLine;
     }
 
     private readonly ConcurrentDictionary<string, long> _logFilePositions = new();
