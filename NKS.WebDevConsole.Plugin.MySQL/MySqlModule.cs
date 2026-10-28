@@ -336,24 +336,26 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
             KillOrphanedProcesses();
 
             var psi = BuildStartInfo();
-            _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
+            var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
 
-            _process.OutputDataReceived += (_, e) =>
+            process.OutputDataReceived += (_, e) =>
             {
                 if (e.Data is not null)
                     PublishLog(e.Data);
             };
-            _process.ErrorDataReceived += (_, e) =>
+            process.ErrorDataReceived += (_, e) =>
             {
                 if (e.Data is not null)
                     PublishLog($"[ERR] {e.Data}");
             };
-            _process.Exited += OnProcessExited;
+            process.Exited += OnProcessExited;
 
-            _process.Start();
-            NKS.WebDevConsole.Core.Services.DaemonJobObject.AssignProcess(_process);
-            _process.BeginOutputReadLine();
-            _process.BeginErrorReadLine();
+            process.Start();
+            NKS.WebDevConsole.Core.Services.DaemonJobObject.AssignProcess(process);
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            // Published only after Start(): GetStatusAsync polls HasExited, which throws on an unstarted Process.
+            _process = process;
 
             _startTime = DateTime.UtcNow;
             _logger.LogInformation("MySQL PID {Pid} launched, waiting for port {Port}...",
@@ -499,13 +501,14 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
                 && _process is not null)
             {
                 bool exited;
-                try { exited = _process.HasExited; }
+                int? oldPid = null;
+                try { exited = _process.HasExited; oldPid = _process.Id; }
                 catch (InvalidOperationException) { exited = true; }  // disposed / never started
                 if (exited)
                 {
                     _logger.LogWarning(
                         "Detected external process exit; state {Old} → Crashed (was pid {Pid})",
-                        _state, _process.Id);
+                        _state, oldPid);
                     _state = ServiceState.Crashed;
                     _startTime = null;
                     _process = null;

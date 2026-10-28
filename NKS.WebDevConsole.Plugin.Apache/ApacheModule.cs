@@ -178,7 +178,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             vhosts_dir = _config.VhostsDirectory,
         };
 
-        var result = CompactConfig(template.Render(model, member => member.Name));
+        var result = RenderConfig(template, model);
         await File.WriteAllTextAsync(_config.ConfigFile, result, ct);
         await EnsureDefaultVhostAsync(ct);
         _logger.LogInformation("Generated httpd.conf at {Path}", _config.ConfigFile);
@@ -327,7 +327,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             php_cgi_path = phpCgiPath,
         };
 
-        var result = CompactConfig(template.Render(model, m => m.Name));
+        var result = RenderConfig(template, model);
         var outPath = ResolveVhostPath(site);
         await File.WriteAllTextAsync(outPath, result, ct);
         foreach (var stalePath in ResolveStaleVhostPaths(site.Domain, outPath))
@@ -878,24 +878,26 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             }
 
             var psi = BuildStartInfo();
-            _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
+            var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
 
-            _process.OutputDataReceived += (_, e) =>
+            process.OutputDataReceived += (_, e) =>
             {
                 if (e.Data is not null)
                     PublishLog(e.Data);
             };
-            _process.ErrorDataReceived += (_, e) =>
+            process.ErrorDataReceived += (_, e) =>
             {
                 if (e.Data is not null)
                     PublishLog($"[ERR] {e.Data}");
             };
-            _process.Exited += OnProcessExited;
+            process.Exited += OnProcessExited;
 
-            _process.Start();
-            NKS.WebDevConsole.Core.Services.DaemonJobObject.AssignProcess(_process);
-            _process.BeginOutputReadLine();
-            _process.BeginErrorReadLine();
+            process.Start();
+            NKS.WebDevConsole.Core.Services.DaemonJobObject.AssignProcess(process);
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            // Published only after Start(): GetStatusAsync polls HasExited, which throws on an unstarted Process.
+            _process = process;
 
 #if WINDOWS
             if (OperatingSystem.IsWindows())
@@ -1109,13 +1111,14 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
                 && _process is not null)
             {
                 bool exited;
-                try { exited = _process.HasExited; }
+                int? oldPid = null;
+                try { exited = _process.HasExited; oldPid = _process.Id; }
                 catch (InvalidOperationException) { exited = true; }  // disposed / never started
                 if (exited)
                 {
                     _logger.LogWarning(
                         "Detected external process exit; state {Old} → Crashed (was pid {Pid})",
-                        _state, _process.Id);
+                        _state, oldPid);
                     _state = ServiceState.Crashed;
                     _startTime = null;
                     _process = null;
@@ -1174,6 +1177,24 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         }
 
         _logger.LogDebug("Log watchers started on {Dir}", logDir);
+    }
+
+    /// <summary>
+    /// Renders a config template without Scriban's AutoIndent, which would add the
+    /// indent of an indented {{ if }} tag to every line of its body after the first.
+    /// </summary>
+    internal static string RenderConfig(Scriban.Template template, object model)
+    {
+        var globals = new Scriban.Runtime.ScriptObject();
+        Scriban.Runtime.ScriptObjectExtensions.Import(globals, model, renamer: member => member.Name);
+        var context = new Scriban.TemplateContext
+        {
+            AutoIndent = false,
+            EnableRelaxedMemberAccess = true,
+            MemberRenamer = member => member.Name,
+        };
+        context.PushGlobal(globals);
+        return CompactConfig(template.Render(context));
     }
 
     /// <summary>

@@ -13,7 +13,7 @@ public sealed class MySqlPlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.mysql";
     public string DisplayName => "MySQL";
-    public string Version => "1.0.11";
+    public string Version => "1.0.12";
 
     private MySqlModule? _module;
     private IDisposable? _binaryInstalledSub;

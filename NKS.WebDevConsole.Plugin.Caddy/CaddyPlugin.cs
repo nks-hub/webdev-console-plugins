@@ -14,7 +14,7 @@ public sealed class CaddyPlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.caddy";
     public string DisplayName => "Caddy";
-    public string Version => "1.0.3";
+    public string Version => "1.0.4";
 
     private CaddyModule? _module;
 
