@@ -21,7 +21,9 @@ public record PhpIniOptions(
     string XdebugMode = "debug",
     int XdebugPort = 9003,
     bool OpcacheEnabled = true,
-    IReadOnlyList<(string Name, bool Enabled)>? Extensions = null
+    IReadOnlyList<(string Name, bool Enabled)>? Extensions = null,
+    int MailSmtpPort = 1025,
+    string? MailpitPath = null
 );
 
 /// <summary>
@@ -75,6 +77,9 @@ public sealed class PhpIniManager
             // PHP 8.5+ builds opcache in; loading it again fails at every start.
             opcache_shared = File.Exists(Path.Combine(opts.ExtDir,
                 OperatingSystem.IsWindows() ? "php_opcache.dll" : "opcache.so")),
+            is_windows = OperatingSystem.IsWindows(),
+            mail_smtp_port = opts.MailSmtpPort,
+            mailpit_path = opts.MailpitPath?.Replace('\\', '/') ?? string.Empty,
             opcache_revalidate_freq = isDev ? 0 : 60,
             opcache_validate_timestamps = isDev ? 1 : 0,
             extensions = exts

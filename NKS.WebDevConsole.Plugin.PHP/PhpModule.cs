@@ -11,6 +11,7 @@ using Scriban.Runtime;
 
 using NKS.WebDevConsole.Core.Interfaces;
 using NKS.WebDevConsole.Core.Models;
+using NKS.WebDevConsole.Core.Services;
 
 namespace NKS.WebDevConsole.Plugin.PHP;
 
@@ -24,6 +25,8 @@ public sealed class PhpModuleConfig
     public int GracefulTimeoutSecs { get; set; } = 10;
     /// <summary>FastCGI base port (Settings: ports.phpFpmBase); PHP X.Y listens on base + X*10 + Y.</summary>
     public int PhpFpmBasePort { get; set; } = 9000;
+    /// <summary>Mailpit SMTP port that mail() targets (Settings: ports.mailpitSmtp).</summary>
+    public int MailSmtpPort { get; set; } = 1025;
 }
 
 /// <summary>
@@ -153,7 +156,9 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
                 ExtDir: extDir,
                 ErrorLog: Path.Combine(_config.LogDirectory, $"php{php.MajorMinor}-errors.log"),
                 TmpDir: Path.GetTempPath(),
-                Extensions: defaultExts
+                Extensions: defaultExts,
+                MailSmtpPort: _config.MailSmtpPort,
+                MailpitPath: FindMailpitBinary()
             );
 
             _logger.LogInformation("PHP {Version}: enabling {Count} default extensions ({Names})",
@@ -232,6 +237,19 @@ public sealed class PhpModule : IServiceModule, IAsyncDisposable
             _state = _running.IsEmpty ? ServiceState.Crashed : ServiceState.Running;
 
         _logger.LogInformation("PHP module started {Count} version(s)", _running.Count);
+    }
+
+    /// <summary>Newest managed mailpit binary for sendmail_path on macOS/Linux; Windows uses SMTP and needs none.</summary>
+    private static string? FindMailpitBinary()
+    {
+        if (OperatingSystem.IsWindows()) return null;
+        var root = Path.Combine(WdcPaths.BinariesRoot, "mailpit");
+        if (!Directory.Exists(root)) return null;
+        return Directory.GetDirectories(root)
+            .Where(d => !Path.GetFileName(d).StartsWith('.'))
+            .OrderByDescending(d => Path.GetFileName(d), SemverVersionComparer.Instance)
+            .Select(d => Path.Combine(d, "mailpit"))
+            .FirstOrDefault(File.Exists);
     }
 
     /// <summary>Re-detects installations when the daemon changed PhpFpmBasePort; returns true if it did.</summary>

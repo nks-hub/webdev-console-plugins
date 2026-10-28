@@ -70,6 +70,15 @@ opcache.revalidate_freq={{ opcache_revalidate_freq }}
 opcache.validate_timestamps={{ opcache_validate_timestamps }}
 {{- end }}
 
+[mail function]
+; mail() goes to the local Mailpit (Services > Mailpit in NKS WebDev Console).
+{{ if is_windows -}}
+SMTP = 127.0.0.1
+smtp_port = {{ mail_smtp_port }}
+{{ else if mailpit_path != "" -}}
+sendmail_path = "{{ mailpit_path }} sendmail -S 127.0.0.1:{{ mail_smtp_port }}"
+{{ end -}}
+
 [Date]
 date.timezone = {{ timezone }}
 
