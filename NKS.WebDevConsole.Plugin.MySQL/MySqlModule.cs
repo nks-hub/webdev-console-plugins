@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using CliWrap;
 using CliWrap.Buffered;
 using Microsoft.Extensions.Logging;
@@ -714,13 +715,15 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
                 $"port = {_config.Port}\n" +
                 $"datadir = {_config.DataDir.Replace('\\', '/')}\n" +
                 (string.IsNullOrEmpty(baseDir) ? "" : $"basedir = {baseDir.Replace('\\', '/')}\n") +
+                "# Local only. Set 0.0.0.0 to reach MySQL from other machines.\n" +
+                "bind-address = 127.0.0.1\n" +
+                "loose-mysqlx-bind-address = 127.0.0.1\n" +
                 "character-set-server = utf8mb4\n" +
                 "collation-server = utf8mb4_unicode_ci\n" +
                 "default-storage-engine = InnoDB\n" +
                 "max_connections = 200\n" +
                 "max_allowed_packet = 256M\n" +
                 "innodb_buffer_pool_size = 256M\n" +
-                "innodb_log_file_size = 64M\n" +
                 "innodb_flush_log_at_trx_commit = 2\n" +
                 "innodb_file_per_table = 1\n" +
                 "# Extend as needed — WDC will not overwrite this file after first run.\n" +
@@ -740,12 +743,52 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// The my.ini mysqld actually reads. mysqld on Windows never looks in the
+    /// data dir, so the generated file only applies through --defaults-file.
+    /// </summary>
+    internal string? EffectiveConfigFile()
+    {
+        if (!string.IsNullOrEmpty(_config.ConfigFile) && File.Exists(_config.ConfigFile))
+            return _config.ConfigFile;
+        var dataDirIni = string.IsNullOrEmpty(_config.DataDir) ? "" : Path.Combine(_config.DataDir, "my.ini");
+        return File.Exists(dataDirIni) ? dataDirIni : null;
+    }
+
+    /// <summary>
+    /// Comments out options that make current mysqld refuse to start. Older WDC
+    /// builds wrote innodb_log_file_size, which MySQL 9 removed; it never took
+    /// effect because the file was not read.
+    /// </summary>
+    internal static string MigrateMyIni(string content) =>
+        Regex.Replace(content, @"^(\s*innodb_log_file_size\s*=.*)$",
+            "# $1  (removed in MySQL 9, commented out by WDC)", RegexOptions.Multiline);
+
     private ProcessStartInfo BuildStartInfo()
     {
         var args = $"--port={_config.Port} --datadir=\"{_config.DataDir}\" --console";
 
-        if (!string.IsNullOrEmpty(_config.ConfigFile) && File.Exists(_config.ConfigFile))
-            args = $"--defaults-file=\"{_config.ConfigFile}\" " + args;
+        var ini = EffectiveConfigFile();
+        var iniText = "";
+        if (ini is not null)
+        {
+            iniText = File.ReadAllText(ini);
+            var migrated = MigrateMyIni(iniText);
+            if (migrated != iniText)
+            {
+                File.WriteAllText(ini, migrated);
+                _logger.LogInformation("Commented out options MySQL 9 rejects in {Path}", ini);
+                iniText = migrated;
+            }
+            args = $"--defaults-file=\"{ini}\" " + args;
+        }
+
+        // Loopback unless my.ini says otherwise: root on a fresh data dir has no
+        // password, and the default 0.0.0.0 exposed it to the local network.
+        if (!Regex.IsMatch(iniText, @"^\s*bind[-_]address\s*=", RegexOptions.Multiline))
+            args += " --bind-address=127.0.0.1";
+        if (!Regex.IsMatch(iniText, @"^\s*(loose-)?mysqlx[-_]bind[-_]address\s*=", RegexOptions.Multiline))
+            args += " --loose-mysqlx-bind-address=127.0.0.1";
 
         return new ProcessStartInfo
         {
