@@ -294,6 +294,7 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
                 // walk into legacy .htaccess files above the served dir.
                 root_parent = SafeParent(site.DocumentRoot),
                 php_ini_path = sitePhpIni ?? string.Empty,
+                php_scan_dir = ResolveSitePhpScanDir(site.Domain) ?? string.Empty,
                 apache_timeout = apacheSettings?.Timeout,
                 fcgid_io_timeout = apacheSettings?.FcgidIOTimeout,
                 fcgid_busy_timeout = apacheSettings?.FcgidBusyTimeout,
@@ -496,6 +497,16 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
     /// otherwise null. Template uses <c>{{ if site.php_ini_path }}</c> so
     /// an empty/absent file cleanly skips the <c>FcgidInitialEnv</c> line.
     /// </summary>
+    /// <summary>
+    /// The per-site conf.d the daemon writes (10-wdc-site-log.ini sets error_log),
+    /// or null when it has not been written; the vhost then omits PHP_INI_SCAN_DIR.
+    /// </summary>
+    private static string? ResolveSitePhpScanDir(string domain)
+    {
+        var dir = Path.Combine(WdcPaths.Root, "sites-php", domain, "conf.d");
+        return File.Exists(Path.Combine(dir, "10-wdc-site-log.ini")) ? dir : null;
+    }
+
     private static string? ResolveSitePhpIniPath(string domain)
     {
         try

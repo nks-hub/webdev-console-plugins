@@ -126,6 +126,10 @@
     # file instead of the global one.
     FcgidInitialEnv PHPRC "{{ site.php_ini_path | string.replace '\\' '/' }}"
     {{- end }}
+    {{ if site.php_scan_dir != '' -}}
+    # Extra ini dir WDC writes per site (error_log per site), loaded on top of the global php.ini.
+    FcgidInitialEnv PHP_INI_SCAN_DIR "{{ site.php_scan_dir | string.replace '\\' '/' }}"
+    {{- end }}
     <FilesMatch "\.php$">
         Options +ExecCGI
         AddHandler fcgid-script .php
@@ -244,6 +248,10 @@
     # child process environment so the forked interpreter loads this
     # file instead of the global one.
     FcgidInitialEnv PHPRC "{{ site.php_ini_path | string.replace '\\' '/' }}"
+    {{- end }}
+    {{ if site.php_scan_dir != '' -}}
+    # Extra ini dir WDC writes per site (error_log per site), loaded on top of the global php.ini.
+    FcgidInitialEnv PHP_INI_SCAN_DIR "{{ site.php_scan_dir | string.replace '\\' '/' }}"
     {{- end }}
     <FilesMatch "\.php$">
         Options +ExecCGI
