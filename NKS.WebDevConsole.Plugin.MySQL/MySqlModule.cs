@@ -767,6 +767,19 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
         Regex.Replace(content, @"^(\s*innodb_log_file_size\s*=.*)$",
             "# $1  (removed in MySQL 9, commented out by WDC)", RegexOptions.Multiline);
 
+    /// <summary>
+    /// MySQL 8.0.17+ on Windows otherwise runs as a monitor parent that forks the server, so the
+    /// PID, CPU and RAM WDC tracked were the monitor's. mysqld matches --no-monitor literally
+    /// (a --loose- prefix still forks) and older servers reject it, hence the version gate,
+    /// read from the binaries/mysql/&lt;version&gt;/bin layout.
+    /// </summary>
+    internal static bool SupportsNoMonitor(string? executablePath)
+    {
+        if (string.IsNullOrEmpty(executablePath)) return false;
+        var versionDir = Path.GetFileName(Path.GetDirectoryName(Path.GetDirectoryName(executablePath)));
+        return Version.TryParse(versionDir, out var version) && version >= new Version(8, 0, 17);
+    }
+
     private ProcessStartInfo BuildStartInfo()
     {
         var args = $"--port={_config.Port} --datadir=\"{_config.DataDir}\" --console";
@@ -792,6 +805,8 @@ public sealed class MySqlModule : IServiceModule, IAsyncDisposable
             args += " --bind-address=127.0.0.1";
         if (!Regex.IsMatch(iniText, @"^\s*(loose-)?mysqlx[-_]bind[-_]address\s*=", RegexOptions.Multiline))
             args += " --loose-mysqlx-bind-address=127.0.0.1";
+        if (OperatingSystem.IsWindows() && SupportsNoMonitor(_config.ExecutablePath))
+            args += " --no-monitor";
 
         return new ProcessStartInfo
         {
