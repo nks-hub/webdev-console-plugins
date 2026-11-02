@@ -91,6 +91,15 @@ public sealed class PostgreSqlModule : IServiceModule, IAsyncDisposable
 
             await EnsureDataDirInitializedAsync(ct);
 
+            // A postmaster left running by an earlier daemon (crash, killed
+            // tree) still owns the data dir; pg_ctl start would refuse it.
+            if (TryAttachPostgresProcess() is { } orphan)
+            {
+                AdoptRunning(orphan);
+                _logger.LogInformation("PostgreSQL already running (PID {Pid}), attached", orphan.Id);
+                return;
+            }
+
             var args = new[]
             {
                 "-D", _config.DataDir,
@@ -105,16 +114,9 @@ public sealed class PostgreSqlModule : IServiceModule, IAsyncDisposable
                 throw new InvalidOperationException($"pg_ctl start exited {exitCode}; see {LogFile}");
 
             await WaitUntilReadyAsync(ct);
-            _process = TryAttachPostgresProcess();
-            if (_process is not null)
-            {
-                _process.EnableRaisingEvents = true;
-                _process.Exited += OnProcessExited;
-                DaemonJobObject.AssignProcess(_process);
-            }
-
-            _startTime = DateTime.UtcNow;
-            lock (_stateLock) _state = ServiceState.Running;
+            var postmaster = TryAttachPostgresProcess()
+                ?? throw new InvalidOperationException($"PostgreSQL answered but postmaster.pid has no live postgres process; see {LogFile}");
+            AdoptRunning(postmaster);
             _logger.LogInformation("PostgreSQL running on port {Port}", _config.Port);
         }
         catch
@@ -157,6 +159,10 @@ public sealed class PostgreSqlModule : IServiceModule, IAsyncDisposable
     {
         if (string.IsNullOrEmpty(_config.PgCtlPath) || !File.Exists(_config.PgCtlPath))
             throw new InvalidOperationException("pg_ctl executable not found");
+        // Nothing to reload: the config is read on the next start. Without this
+        // the daemon's startup hydration hit a stale postmaster.pid and warned.
+        lock (_stateLock)
+            if (_state != ServiceState.Running) return;
 
         var result = await Cli.Wrap(_config.PgCtlPath)
             .WithArguments(new[] { "-D", _config.DataDir, "reload" })
@@ -173,9 +179,10 @@ public sealed class PostgreSqlModule : IServiceModule, IAsyncDisposable
         int? pid;
         lock (_stateLock)
         {
-            if (_state is ServiceState.Running or ServiceState.Starting)
-                _process ??= TryAttachPostgresProcess();
-            if (_state is ServiceState.Running or ServiceState.Starting && _process is null)
+            // While Starting there is no postmaster yet; only a Running service
+            // without one has crashed. (Flagging Starting as Crashed fired a
+            // "service crashed" toast on every start.)
+            if (_state == ServiceState.Running && (_process is null || HasExited(_process)))
                 _state = ServiceState.Crashed;
             state = _state;
             pid = _process?.Id;
@@ -191,14 +198,22 @@ public sealed class PostgreSqlModule : IServiceModule, IAsyncDisposable
         var result = new List<string>(lines);
         if (File.Exists(LogFile))
         {
-            var tail = File.ReadLines(LogFile).TakeLast(lines).ToArray();
+            // postgres keeps the log open for writing.
+            using var fs = new FileStream(LogFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(fs);
+            var tail = new Queue<string>(lines);
+            while (await reader.ReadLineAsync(ct) is { } line)
+            {
+                if (tail.Count == lines) tail.Dequeue();
+                tail.Enqueue(line);
+            }
             result.AddRange(tail);
         }
 
         while (result.Count < lines && _logChannel.Reader.TryRead(out var line))
             result.Add(line);
 
-        return await Task.FromResult(result);
+        return result;
     }
 
     public ValueTask DisposeAsync()
@@ -290,18 +305,51 @@ public sealed class PostgreSqlModule : IServiceModule, IAsyncDisposable
         throw new TimeoutException($"PostgreSQL did not become ready on port {_config.Port} within 20 seconds.");
     }
 
+    private void AdoptRunning(Process postmaster)
+    {
+        postmaster.EnableRaisingEvents = true;
+        postmaster.Exited += OnProcessExited;
+        DaemonJobObject.AssignProcess(postmaster);
+        _process?.Dispose();
+        _process = postmaster;
+        _startTime = DateTime.UtcNow;
+        lock (_stateLock) _state = ServiceState.Running;
+    }
+
     private Process? TryAttachPostgresProcess()
     {
         var pidFile = Path.Combine(_config.DataDir, "postmaster.pid");
         if (!File.Exists(pidFile)) return null;
-        var first = File.ReadLines(pidFile).FirstOrDefault();
-        return int.TryParse(first, out var pid) ? TryGetProcess(pid) : null;
+        string? first;
+        try
+        {
+            using var fs = new FileStream(pidFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            first = new StreamReader(fs).ReadLine();
+        }
+        catch (IOException) { return null; }
+        return int.TryParse(first, out var pid) ? TryGetPostgresProcess(pid) : null;
     }
 
-    private static Process? TryGetProcess(int pid)
+    /// <summary>
+    /// The process with this PID, if it is still a postgres. After an unclean
+    /// shutdown postmaster.pid survives and Windows may have reused the PID.
+    /// </summary>
+    internal static Process? TryGetPostgresProcess(int pid)
     {
-        try { return Process.GetProcessById(pid); }
-        catch { return null; }
+        try
+        {
+            var p = Process.GetProcessById(pid);
+            if (p.ProcessName.Equals("postgres", StringComparison.OrdinalIgnoreCase)) return p;
+            p.Dispose();
+        }
+        catch { /* gone or not accessible */ }
+        return null;
+    }
+
+    private static bool HasExited(Process p)
+    {
+        try { return p.HasExited; }
+        catch { return true; }
     }
 
     private void OnProcessExited(object? sender, EventArgs e)
