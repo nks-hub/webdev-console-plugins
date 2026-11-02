@@ -1280,7 +1280,16 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
 
     private void StopLogFileWatchers()
     {
-        _watcherCts?.Cancel();
+        // Take the CTS out before touching it: DisposeAsync can run more than
+        // once at host shutdown, and Cancel() on a disposed source threw an
+        // unhandled ObjectDisposedException that turned every clean daemon
+        // stop into a crash (and an immediate respawn by the GUI).
+        var cts = Interlocked.Exchange(ref _watcherCts, null);
+        if (cts is not null)
+        {
+            cts.Cancel();
+            cts.Dispose();
+        }
         foreach (var w in _logWatchers)
         {
             w.EnableRaisingEvents = false;
@@ -1384,7 +1393,6 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
         }
 
         _process?.Dispose();
-        _watcherCts?.Dispose();
         return ValueTask.CompletedTask;
     }
 }
