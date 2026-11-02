@@ -30,7 +30,14 @@ public sealed class CloudflareApi
     public CloudflareApi(CloudflareConfig config)
     {
         _config = config;
-        _http = new HttpClient { BaseAddress = new Uri(BaseUrl), Timeout = TimeSpan.FromSeconds(15) };
+        // Retries transient failures (timeouts, 5xx, 429) with a 10 s limit per
+        // attempt; the overall timeout covers three attempts plus back-off. A single
+        // 15 s try made site applies fail on every slow answer.
+        _http = new HttpClient(new TransientRetryHandler(new HttpClientHandler()))
+        {
+            BaseAddress = new Uri(BaseUrl),
+            Timeout = TimeSpan.FromSeconds(40),
+        };
         _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("NKS-WebDevConsole/1.0 (+cloudflare-plugin)");
     }
