@@ -913,15 +913,17 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             _logger.LogInformation("Apache PID {Pid} launched, waiting for port {Port}...",
                 _process.Id, _config.HttpPort);
 
+            // 30 s: with dozens of vhosts and SSL, a start during the daemon's
+            // startup re-apply regularly needed more than the former 15 s.
             var ready = await _healthChecker.WaitForReadyAsync(
                 _config.HttpPort,
-                TimeSpan.FromSeconds(15),
+                TimeSpan.FromSeconds(30),
                 ct);
 
             if (!ready)
             {
                 lock (_stateLock) _state = ServiceState.Crashed;
-                throw new TimeoutException($"Apache did not bind to port {_config.HttpPort} within 15 seconds.");
+                throw new TimeoutException($"Apache did not bind to port {_config.HttpPort} within 30 seconds.");
             }
 
             lock (_stateLock) _state = ServiceState.Running;
