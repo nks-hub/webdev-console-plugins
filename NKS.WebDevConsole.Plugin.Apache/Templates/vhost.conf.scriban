@@ -16,6 +16,8 @@
 
 <VirtualHost {{ bind_address }}:{{ https_port }}>
     ServerName wdc-unmatched.local
+    # The borrowed site cert never names wdc-unmatched.local; skip AH01909 noise.
+    LogLevel warn ssl:error
     SSLEngine on
     SSLCertificateFile "{{ site.cert_path | string.replace '\\' '/' }}"
     SSLCertificateKeyFile "{{ site.key_path | string.replace '\\' '/' }}"

@@ -465,6 +465,8 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
             {
                 $"<VirtualHost *:{_config.HttpsPort}>",
                 "    ServerName wdc-unmatched.local",
+                // The localhost cert never names wdc-unmatched.local; skip AH01909 noise.
+                "    LogLevel warn ssl:error",
                 "    SSLEngine on",
                 $"    SSLCertificateFile \"{ApachePath(certPath)}\"",
                 $"    SSLCertificateKeyFile \"{ApachePath(keyPath)}\"",
