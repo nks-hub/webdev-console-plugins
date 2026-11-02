@@ -1,7 +1,7 @@
 {
   "id": "nks.wdc.postgresql",
   "name": "PostgreSQL",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "PostgreSQL service module - manages postgres lifecycle with initdb, pg_ctl, pg_isready, generated data directory, and local development defaults.",
   "author": "NKS Hub",
   "category": "Databases",

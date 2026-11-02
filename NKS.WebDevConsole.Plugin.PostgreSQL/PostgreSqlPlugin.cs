@@ -10,7 +10,7 @@ public sealed class PostgreSqlPlugin : IWdcPlugin, IFrontendPanelProvider
 {
     public string Id => "nks.wdc.postgresql";
     public string DisplayName => "PostgreSQL";
-    public string Version => "1.0.1";
+    public string Version => "1.0.2";
 
     private PostgreSqlModule? _module;
     private IDisposable? _binaryInstalledSub;

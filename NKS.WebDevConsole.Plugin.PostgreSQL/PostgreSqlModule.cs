@@ -95,6 +95,7 @@ public sealed class PostgreSqlModule : IServiceModule, IAsyncDisposable
             // tree) still owns the data dir; pg_ctl start would refuse it.
             if (TryAttachPostgresProcess() is { } orphan)
             {
+                await WaitUntilReadyAsync(ct); // it may be shutting down right now
                 AdoptRunning(orphan);
                 _logger.LogInformation("PostgreSQL already running (PID {Pid}), attached", orphan.Id);
                 return;
@@ -114,7 +115,7 @@ public sealed class PostgreSqlModule : IServiceModule, IAsyncDisposable
                 throw new InvalidOperationException($"pg_ctl start exited {exitCode}; see {LogFile}");
 
             await WaitUntilReadyAsync(ct);
-            var postmaster = TryAttachPostgresProcess()
+            var postmaster = await AttachWithRetryAsync(ct)
                 ?? throw new InvalidOperationException($"PostgreSQL answered but postmaster.pid has no live postgres process; see {LogFile}");
             AdoptRunning(postmaster);
             _logger.LogInformation("PostgreSQL running on port {Port}", _config.Port);
@@ -138,31 +139,42 @@ public sealed class PostgreSqlModule : IServiceModule, IAsyncDisposable
             _state = ServiceState.Stopping;
         }
 
-        if (!string.IsNullOrEmpty(_config.PgCtlPath) && File.Exists(_config.PgCtlPath))
+        try
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(_config.GracefulTimeoutSecs));
-            var result = await Cli.Wrap(_config.PgCtlPath)
-                .WithArguments(new[] { "-D", _config.DataDir, "stop", "-m", "fast" })
-                .WithValidation(CommandResultValidation.None)
-                .ExecuteBufferedAsync(cts.Token);
-            PublishBuffered(result);
+            if (!string.IsNullOrEmpty(_config.PgCtlPath) && File.Exists(_config.PgCtlPath))
+            {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(TimeSpan.FromSeconds(_config.GracefulTimeoutSecs));
+                var result = await Cli.Wrap(_config.PgCtlPath)
+                    .WithArguments(new[] { "-D", _config.DataDir, "stop", "-m", "fast" })
+                    .WithValidation(CommandResultValidation.None)
+                    .ExecuteBufferedAsync(cts.Token);
+                PublishBuffered(result);
+            }
         }
-
-        _process?.Dispose();
-        _process = null;
-        _startTime = null;
-        lock (_stateLock) _state = ServiceState.Stopped;
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("pg_ctl stop did not finish in {Secs}s; killing the postmaster", _config.GracefulTimeoutSecs);
+            try { _process?.Kill(entireProcessTree: true); } catch { /* already gone */ }
+        }
+        finally
+        {
+            // Never leave the module stuck in Stopping.
+            _process?.Dispose();
+            _process = null;
+            _startTime = null;
+            lock (_stateLock) _state = ServiceState.Stopped;
+        }
     }
 
     public async Task ReloadAsync(CancellationToken ct)
     {
-        if (string.IsNullOrEmpty(_config.PgCtlPath) || !File.Exists(_config.PgCtlPath))
-            throw new InvalidOperationException("pg_ctl executable not found");
         // Nothing to reload: the config is read on the next start. Without this
         // the daemon's startup hydration hit a stale postmaster.pid and warned.
         lock (_stateLock)
             if (_state != ServiceState.Running) return;
+        if (string.IsNullOrEmpty(_config.PgCtlPath) || !File.Exists(_config.PgCtlPath))
+            throw new InvalidOperationException("pg_ctl executable not found");
 
         var result = await Cli.Wrap(_config.PgCtlPath)
             .WithArguments(new[] { "-D", _config.DataDir, "reload" })
@@ -316,25 +328,57 @@ public sealed class PostgreSqlModule : IServiceModule, IAsyncDisposable
         lock (_stateLock) _state = ServiceState.Running;
     }
 
+    private async Task<Process?> AttachWithRetryAsync(CancellationToken ct)
+    {
+        // postgres may be rewriting postmaster.pid right after it answers.
+        for (var attempt = 0; ; attempt++)
+        {
+            if (TryAttachPostgresProcess() is { } p) return p;
+            if (attempt == 2) return null;
+            await Task.Delay(200, ct);
+        }
+    }
+
     private Process? TryAttachPostgresProcess()
     {
         var pidFile = Path.Combine(_config.DataDir, "postmaster.pid");
         if (!File.Exists(pidFile)) return null;
-        string? first;
+        var lines = new List<string>();
         try
         {
             using var fs = new FileStream(pidFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            first = new StreamReader(fs).ReadLine();
+            using var reader = new StreamReader(fs);
+            while (lines.Count < 4 && reader.ReadLine() is { } line) lines.Add(line);
         }
         catch (IOException) { return null; }
-        return int.TryParse(first, out var pid) ? TryGetPostgresProcess(pid) : null;
+        return MatchPostmaster(lines, _config.Port, TryGetPostgresProcess);
     }
 
     /// <summary>
-    /// The process with this PID, if it is still a postgres. After an unclean
-    /// shutdown postmaster.pid survives and Windows may have reused the PID.
+    /// The live postmaster described by the first lines of postmaster.pid (PID,
+    /// data dir, start time as Unix seconds, port), or null when the file is
+    /// stale. After an unclean shutdown the file survives and Windows may hand
+    /// its PID to another postgres (e.g. a system PostgreSQL service), so the
+    /// port and the process start time must match too.
     /// </summary>
-    internal static Process? TryGetPostgresProcess(int pid)
+    internal static Process? MatchPostmaster(IReadOnlyList<string> lines, int port, Func<int, Process?> getProcess)
+    {
+        if (lines.Count < 4 || !int.TryParse(lines[0].Trim(), out var pid)) return null;
+        if (lines[3].Trim() != port.ToString()) return null;
+        if (!long.TryParse(lines[2].Trim(), out var startedEpoch)) return null;
+        var p = getProcess(pid);
+        if (p is null) return null;
+        try
+        {
+            var started = DateTimeOffset.FromUnixTimeSeconds(startedEpoch);
+            if (Math.Abs((new DateTimeOffset(p.StartTime) - started).TotalSeconds) <= 5) return p;
+        }
+        catch { /* StartTime not readable: treat as not ours */ }
+        p.Dispose();
+        return null;
+    }
+
+    private static Process? TryGetPostgresProcess(int pid)
     {
         try
         {
