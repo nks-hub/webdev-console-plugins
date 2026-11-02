@@ -1126,6 +1126,20 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
                     _process = null;
                 }
             }
+            // A start that missed the 15 s bind deadline (busy startup re-apply of
+            // many sites) is marked Crashed, but httpd keeps running and binds a bit
+            // later. The tracked process being alive is the truth: report Running.
+            if (_state == ServiceState.Crashed && _process is not null)
+            {
+                bool alive;
+                try { alive = !_process.HasExited; } catch (InvalidOperationException) { alive = false; }
+                if (alive)
+                {
+                    _logger.LogInformation("Apache (pid {Pid}) is running after a slow start; state Crashed → Running", _process.Id);
+                    _state = ServiceState.Running;
+                    _startTime ??= DateTime.UtcNow;
+                }
+            }
             state = _state;
             pid = _process?.Id;
         }
@@ -1314,7 +1328,15 @@ public sealed class ApacheModule : IServiceModule, IAsyncDisposable
 
     private void OnProcessExited(object? sender, EventArgs e)
     {
-        var exitCode = _process?.ExitCode ?? -1;
+        // A restart replaces _process before the old httpd's Exited event fires;
+        // that old exit is expected and must not mark the new instance crashed.
+        if (sender is Process exited && !ReferenceEquals(exited, _process))
+        {
+            _logger.LogDebug("Previous Apache process exited after a restart");
+            return;
+        }
+        int exitCode;
+        try { exitCode = (sender as Process)?.ExitCode ?? -1; } catch { exitCode = -1; }
         _logger.LogWarning("Apache process exited with code {ExitCode}", exitCode);
 
         lock (_stateLock)
